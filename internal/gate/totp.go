@@ -43,28 +43,49 @@ func ValidateSecretFormat(secret string) error {
 // ValidateTOTP validates a 6-digit TOTP code against a Base32 secret string.
 // Allows a +/- 1 step drift window (total 90 seconds window).
 func ValidateTOTP(secretBase32, inputCode string, t time.Time) (bool, error) {
+	valid, _, err := ValidateTOTPWithStep(secretBase32, inputCode, t)
+	return valid, err
+}
+
+// ValidateTOTPWithStep performs the same validation as ValidateTOTP and also
+// returns the matched RFC 6238 time-step. The step is used by the gate manager
+// to prevent replaying the same TOTP to mint multiple leases.
+func ValidateTOTPWithStep(secretBase32, inputCode string, t time.Time) (bool, int64, error) {
 	cleanSecret := strings.ToUpper(strings.ReplaceAll(secretBase32, " ", ""))
 	if cleanSecret == "" {
-		return false, errors.New("TOTP secret is empty")
+		return false, 0, errors.New("TOTP secret is empty")
 	}
 
 	key, err := decodeBase32(cleanSecret)
 	if err != nil {
-		return false, fmt.Errorf("invalid base32 secret: %w", err)
+		return false, 0, fmt.Errorf("invalid base32 secret: %w", err)
 	}
 
 	cleanInput := strings.TrimSpace(inputCode)
-	currentStep := t.Unix() / TOTPPeriod
-
-	// Check current step, previous step (-1), and next step (+1) for clock drift
-	for stepOffset := int64(-1); stepOffset <= 1; stepOffset++ {
-		expectedCode := generateHOTP(key, uint64(currentStep+stepOffset), TOTPDigits)
-		if subtle.ConstantTimeCompare([]byte(expectedCode), []byte(cleanInput)) == 1 {
-			return true, nil
+	if len(cleanInput) != TOTPDigits {
+		return false, 0, nil
+	}
+	for _, ch := range cleanInput {
+		if ch < '0' || ch > '9' {
+			return false, 0, nil
 		}
 	}
 
-	return false, nil
+	currentStep := t.Unix() / TOTPPeriod
+
+	// Check current step, previous step (-1), and next step (+1) for clock drift.
+	for stepOffset := int64(-1); stepOffset <= 1; stepOffset++ {
+		step := currentStep + stepOffset
+		if step < 0 {
+			continue
+		}
+		expectedCode := generateHOTP(key, uint64(step), TOTPDigits)
+		if subtle.ConstantTimeCompare([]byte(expectedCode), []byte(cleanInput)) == 1 {
+			return true, step, nil
+		}
+	}
+
+	return false, 0, nil
 }
 
 // GenerateCurrentTOTP generates the current 6-digit TOTP code for the given Base32 secret.
