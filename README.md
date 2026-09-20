@@ -15,7 +15,7 @@
 
 ## 目录
 - [为什么选择 2cfa-mcp？](#为什么选择-2cfa-mcp)
-- [核心设计：4 大极简原则（KISS 哲学）](#核心设计4-大极简原则kiss-哲学)
+- [核心设计：三种使用模式（一分钟看懂权限逻辑）](#核心设计三种使用模式一分钟看懂权限逻辑)
 - [核心 MCP 工具集](#核心-mcp-工具集)
 - [第一部分：服务端极速部署与公网穿透](#第一部分服务端极速部署与公网穿透)
 - [第二部分：在 ChatGPT 网页版中添加 MCP 服务（核心教程）](#第二部分在-chatgpt-网页版中添加-mcp-服务核心教程)
@@ -34,20 +34,15 @@
 
 ---
 
-## 核心设计：4 大极简原则（KISS 哲学）
+## 核心设计：三种使用模式（一分钟看懂权限逻辑）
 
-1. **默认仅凭 Token 直连（零门槛，开箱即用）**：
-   - 新手或日常自用，只需在 `.env` 设置一个 `AUTH_TOKEN`，手机或 VPS 启动后直接连接，**不需要任何复杂的初始配置，零拦截、零弹窗**。
-2. **支持在对话里设置/启用 2FA（按需动态安全升级）**：
-   - 处于公共网络或需要临时借出？直接在 ChatGPT 聊天框对 AI 说：“*帮我开启 2FA，密钥是 JBSWY3DPEHPK3PXP*”。
-   - AI 自动调用 `setup_2fa(enable=true, secret="...")` 动态启用物理门禁，**无需重启服务端，零配置文件负担**！
-3. **默认隐式码（lease_token）不过期（不打扰用户）**：
-   - 启用 2FA 后，在对话中报一次 6 位动态码，AI 调用 `unlock_gate(code="...")` 解锁。
-   - 服务端签发的动态租约令牌（`lease_token`）**默认在本场对话中永久有效（不会隔 60 分钟强制踢你下线）**。
-   - AI 在后台隐式带码，**聊天界面无乱码**，底层 SSE 网络抖动重连无感保持。
-4. **支持在对话里随意控制有效期与随时锁门**：
-   - **指定限时开闸**：在公网或临时授权时对 AI 说：“*帮我开门 30 分钟*”，AI 传入 `duration_minutes=30`，到期自动物理关闸。
-   - **随时一键关闸**：对 AI 说：“*把门锁上*”，AI 调用 `lock_gate()` 立即断电上锁。
+整个项目的权限模型极其直观，**本质上只有以下 3 种使用情况**：
+
+| 模式 | 配置与状态 | 权限与体验 | 适用人群/场景 |
+| :--- | :--- | :--- | :--- |
+| **1. Token 直连模式（默认）** | 不配置/不开启 2FA，仅设 `AUTH_TOKEN` | **只要 Token 对，就拥有全部权限！** 所有命令和读写工具秒级直通运行，零拦截、零弹窗、零打扰。 | **本地用户 / 局域网用户 / 个人极简自用** |
+| **2. 对话 2FA 会话模式** | 对话中开启 2FA，报一次 6 位动态码 | **报一次码，本场对话一直有全部权限！** 签发的隐式通行证（`lease_token`）默认不过期，AI 在后台静默携带，界面无乱码，网络重连不掉线。 | **公网暴露（如 CF 穿透）但自己长期使用** |
+| **3. 对话 2FA 限时模式** | 对话中指定开闸时间（如“*帮我开门 30 分钟*”） | **时效内带隐式通行证有全部权限，超时自动锁死！** 超过设定时间后自动撤销凭证，需重新报验证码解锁。 | **临时借给他人使用 / 在不可信公共设备上操作** |
 
 ---
 
@@ -261,11 +256,13 @@ https://<你的穿透域名>/gate?token=<你的AUTH_TOKEN>
 
 `2cfa-mcp` is an ultra-lightweight, high-security remote **Model Context Protocol (MCP)** server implemented in **Go 1.22+**. Designed specifically for **Android Termux (24/7 background alive)**, **low-spec Linux VPS (512MB RAM)**, and **Raspberry Pi**, it connects ChatGPT Web and remote AI agents to edge devices with minimal footprint (~12MB RAM) and zero-friction security.
 
-## The 4 Minimal Principles
-1. **Direct Token Connect by Default**: Connect right out of the box with `AUTH_TOKEN`. Zero initial popups or barriers.
-2. **Conversational 2FA Configuration**: Enable or disable Google Authenticator protection directly inside chat via `setup_2fa`.
-3. **Implicit Lease Tokens**: Unlock with a 6-digit TOTP code once; the dynamic lease token stays active for your chat session without disrupting the UI.
-4. **Custom Lease Duration & Emergency Lock**: Specify `duration_minutes` anytime or instruct AI to `lock_gate()` immediately.
+## Core Architecture: 3 Simple Modes (Zero-Friction Mental Model)
+
+| Mode | Configuration | Access & Experience | Best For |
+| :--- | :--- | :--- | :--- |
+| **1. Direct Token Mode (Default)** | No 2FA configured; only `AUTH_TOKEN` is set. | **Valid Token = 100% Full Access!** All shell commands and file tools run directly with zero popups or hurdles. | **Local users / Home LAN / Personal use** |
+| **2. Conversational 2FA Mode** | Enable 2FA in chat and provide a 6-digit TOTP code once. | **Unlock once, full access for the entire conversation!** Issued implicit lease token never expires during the session. AI carries it silently in background JSON. | **Exposed to public via Cloudflare Tunnel** |
+| **3. Timed 2FA Mode** | Specify duration during unlock (e.g., *"Open gate for 30 minutes"*). | **Full access within time window; auto-locks when expired.** Re-verification required after time runs out. | **Lending to others / Public untrusted devices** |
 
 ## Quick Start in 3 Minutes
 
