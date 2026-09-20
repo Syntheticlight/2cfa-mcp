@@ -24,6 +24,13 @@ func NewHandler(manager *Manager, authToken string) *Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Dashboard hardening. The page intentionally uses inline CSS/JS, but blocks
+	// third-party network destinations and framing. Audit values are escaped below.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+
 	// Simple auth check for /gate dashboard: query param ?token= or Authorization header
 	token := r.URL.Query().Get("token")
 	if token == "" {
@@ -440,6 +447,16 @@ const dashboardHTML = `<!DOCTYPE html>
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token') || '';
 
+    function escapeHTML(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[ch]);
+    }
+
     function formatSeconds(sec) {
       if (sec <= 0) return "00:00:00";
       const h = Math.floor(sec / 3600).toString().padStart(2, '0');
@@ -482,7 +499,11 @@ const dashboardHTML = `<!DOCTYPE html>
         if (b) {
           b.style.display = 'block';
           document.getElementById('updateText').innerText = 'New ' + update.latest_version + ' available!';
-          document.getElementById('updateLink').href = update.release_url;
+          if (typeof update.release_url === 'string' && update.release_url.startsWith('https://github.com/')) {
+            document.getElementById('updateLink').href = update.release_url;
+          } else {
+            document.getElementById('updateLink').removeAttribute('href');
+          }
         }
       }
       const badge = document.getElementById('statusBadge');
@@ -526,12 +547,12 @@ const dashboardHTML = `<!DOCTYPE html>
         if (a.status === 'LOCKED') badgeClass = 'badge-locked';
 
         return '<tr>' +
-          '<td>' + time + '</td>' +
-          '<td><code>' + a.tool_name + '</code></td>' +
-          '<td>' + a.client_ip + '<span class="country-tag">' + a.country + '</span></td>' +
-          '<td>' + a.duration_ms + ' ms</td>' +
-          '<td><span class="badge ' + badgeClass + '">' + a.status + '</span></td>' +
-          '<td style="color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (a.message || '-') + '</td>' +
+          '<td>' + escapeHTML(time) + '</td>' +
+          '<td><code>' + escapeHTML(a.tool_name) + '</code></td>' +
+          '<td>' + escapeHTML(a.client_ip) + '<span class="country-tag">' + escapeHTML(a.country) + '</span></td>' +
+          '<td>' + escapeHTML(a.duration_ms) + ' ms</td>' +
+          '<td><span class="badge ' + badgeClass + '">' + escapeHTML(a.status) + '</span></td>' +
+          '<td style="color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(a.message || '-') + '</td>' +
           '</tr>';
       }).join('');
     }
