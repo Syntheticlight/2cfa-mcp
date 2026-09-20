@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, e.g. v1.0.5"
+        description: "Release tag, e.g. v1.0.7"
         required: true
-        default: "v1.0.6"
+        default: "v1.0.7"
 
 permissions:
   contents: write
@@ -68,6 +68,13 @@ jobs:
       - name: Test
         if: steps.version.outputs.exists != 'true'
         run: go test ./...
+
+      - name: Govulncheck
+        if: steps.version.outputs.exists != 'true'
+        shell: bash
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck ./...
 
       - name: Build release binaries
         if: steps.version.outputs.exists != 'true'
