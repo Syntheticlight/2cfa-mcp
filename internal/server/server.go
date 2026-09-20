@@ -112,6 +112,11 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	// MCP endpoints handler wrapper
 	mcpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clientIP, country := gate.ResolveClientIP(r)
+		// Stamp a server-controlled identity for downstream MCP tool handlers.
+		// Set overwrites any client-supplied values with the sanitized peer identity.
+		r.Header.Set("X-2CFA-Client-IP", clientIP)
+		r.Header.Set("X-2CFA-Client-Country", country)
+
 		sanitizedURI := auth.SanitizeURL(r.URL.RequestURI(), cfg.AuthToken)
 		log.Printf("[REQ] %s %s from %s [%s]", r.Method, sanitizedURI, clientIP, country)
 
