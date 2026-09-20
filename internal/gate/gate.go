@@ -774,8 +774,8 @@ func PersistEnv(filePath string, updates map[string]string) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("failed to close temporary env file: %w", err)
 	}
-	if err := os.Rename(tmpName, filePath); err != nil {
-		return fmt.Errorf("failed to atomically replace env file: %w", err)
+	if err := replaceFileSafely(tmpName, filePath); err != nil {
+		return fmt.Errorf("failed to replace env file: %w", err)
 	}
 
 	for key, val := range updates {
