@@ -17,6 +17,8 @@ import (
 )
 
 // ServerConfig defines the server configuration parameters.
+const MaxRequestBodyBytes int64 = 16 * 1024 * 1024 // 16 MiB hard cap for MCP POST bodies
+
 type ServerConfig struct {
 	Port          int
 	AuthToken     string
@@ -111,6 +113,16 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 
 	// MCP endpoints handler wrapper
 	mcpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.Body != nil {
+			if r.ContentLength > MaxRequestBodyBytes {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				_, _ = w.Write([]byte(`{"error":"request body too large"}`))
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodyBytes)
+		}
+
 		clientIP, country := gate.ResolveClientIP(r)
 		sanitizedURI := auth.SanitizeURL(r.URL.RequestURI(), cfg.AuthToken)
 		log.Printf("[REQ] %s %s from %s [%s]", r.Method, sanitizedURI, clientIP, country)
