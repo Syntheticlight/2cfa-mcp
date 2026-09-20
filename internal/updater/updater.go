@@ -32,8 +32,8 @@ type UpdateInfo struct {
 }
 
 var (
-	mu          sync.RWMutex
-	cachedInfo  UpdateInfo = UpdateInfo{
+	mu         sync.RWMutex
+	cachedInfo UpdateInfo = UpdateInfo{
 		CurrentVersion: CurrentVersion,
 		LatestVersion:  CurrentVersion,
 		HasUpdate:      false,
