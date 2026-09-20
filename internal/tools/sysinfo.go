@@ -47,7 +47,7 @@ func RegisterSysInfoTool(s *server.MCPServer, gateMgr *gate.Manager) {
 
 		sb.WriteString("=== Memory Metrics (Process) ===\n")
 		sb.WriteString(fmt.Sprintf("Allocated RAM:     %.2f MB\n", float64(m.Alloc)/1024/1024))
-		sb.WriteString(fmt.Sprintf("Total Sys RAM:     %.2f MB\n", float64(m.Sys)/1024/1024))
+		sb.WriteString(fmt.Sprintf("Go Runtime Sys:    %.2f MB\n", float64(m.Sys)/1024/1024))
 		sb.WriteString(fmt.Sprintf("Heap Allocated:    %.2f MB\n", float64(m.HeapAlloc)/1024/1024))
 		sb.WriteString(fmt.Sprintf("GC Cycles:         %d\n\n", m.NumGC))
 
