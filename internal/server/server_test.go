@@ -1,8 +1,8 @@
 package server
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -204,7 +204,6 @@ func TestSSERoutingTrailingSlashAndDirectAccept(t *testing.T) {
 	}
 }
 
-
 func TestOversizedMCPRequestRejected(t *testing.T) {
 	tmpDir := t.TempDir()
 	token := "body-limit-token"
@@ -231,7 +230,6 @@ func TestOversizedMCPRequestRejected(t *testing.T) {
 		t.Fatalf("expected %d for oversized body, got %d", http.StatusRequestEntityTooLarge, rec.Code)
 	}
 }
-
 
 func TestOversizedGateRequestRejected(t *testing.T) {
 	tmpDir := t.TempDir()
