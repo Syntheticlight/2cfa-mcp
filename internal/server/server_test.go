@@ -259,7 +259,6 @@ func TestOversizedGateRequestRejected(t *testing.T) {
 	}
 }
 
-
 func TestHTTPTimeoutsSupportLongLivedSSE(t *testing.T) {
 	tmpDir := t.TempDir()
 	srv, err := NewServer(ServerConfig{
