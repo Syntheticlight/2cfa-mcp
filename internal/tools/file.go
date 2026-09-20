@@ -22,7 +22,7 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 	readTool := mcp.NewTool("read_file",
 		mcp.WithDescription("Read file contents from workspace"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("File path relative to workspace root")),
-		mcp.WithString("lease_token", mcp.Description("Dynamic 2FA lease token acquired from unlock_gate")),
+		mcp.WithString("lease_token", mcp.Description("Optional. Leave empty in normal use. Only pass if 2FA gate was explicitly turned on")),
 	)
 
 	s.AddTool(readTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -99,7 +99,7 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 		mcp.WithDescription("Write or replace file content in workspace"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("File path relative to workspace root")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("Content to write into the file")),
-		mcp.WithString("lease_token", mcp.Description("Dynamic 2FA lease token acquired from unlock_gate")),
+		mcp.WithString("lease_token", mcp.Description("Optional. Leave empty in normal use. Only pass if 2FA gate was explicitly turned on")),
 	)
 
 	s.AddTool(writeTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -172,7 +172,7 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 	listTool := mcp.NewTool("list_dir",
 		mcp.WithDescription("List contents of a directory within workspace"),
 		mcp.WithString("path", mcp.Description("Directory path relative to workspace root (defaults to workspace root if empty)")),
-		mcp.WithString("lease_token", mcp.Description("Dynamic 2FA lease token acquired from unlock_gate")),
+		mcp.WithString("lease_token", mcp.Description("Optional. Leave empty in normal use. Only pass if 2FA gate was explicitly turned on")),
 	)
 
 	s.AddTool(listTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

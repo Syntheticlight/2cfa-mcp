@@ -30,7 +30,7 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 		mcp.WithString("command", mcp.Required(), mcp.Description("The shell command to execute")),
 		mcp.WithString("work_dir", mcp.Description("Optional sub-directory relative to workspace root")),
 		mcp.WithNumber("timeout_seconds", mcp.Description("Optional execution timeout in seconds")),
-		mcp.WithString("lease_token", mcp.Description("Dynamic 2FA lease token acquired from unlock_gate")),
+		mcp.WithString("lease_token", mcp.Description("Optional. Leave empty in normal use. Only pass if 2FA gate was explicitly turned on")),
 	)
 
 	s.AddTool(tool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
