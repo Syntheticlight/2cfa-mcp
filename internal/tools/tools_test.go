@@ -21,7 +21,7 @@ func TestFullConversational2FAWorkflow(t *testing.T) {
 	})
 
 	mcpSrv := server.NewMCPServer("test", "1.0.0")
-	RegisterGateTools(mcpSrv, gateMgr, tmpDir)
+	RegisterGateTools(mcpSrv, gateMgr)
 	RegisterCommandTool(mcpSrv, tmpDir, 5*time.Second, gateMgr)
 	RegisterFileTools(mcpSrv, tmpDir, gateMgr)
 	RegisterSysInfoTool(mcpSrv, gateMgr)
@@ -184,10 +184,9 @@ func TestResolveShell(t *testing.T) {
 }
 
 func TestSetup2FAValidation(t *testing.T) {
-	tmpDir := t.TempDir()
 	gateMgr := gate.NewManager(gate.Config{Enabled: false})
 	mcpSrv := server.NewMCPServer("test", "1.0.0")
-	RegisterGateTools(mcpSrv, gateMgr, tmpDir)
+	RegisterGateTools(mcpSrv, gateMgr)
 
 	setupTool := mcpSrv.GetTool("setup_2fa")
 
@@ -229,13 +228,12 @@ func TestSetup2FAValidation(t *testing.T) {
 }
 
 func TestSetup2FAWhenAlreadyEnabled(t *testing.T) {
-	tmpDir := t.TempDir()
 	gateMgr := gate.NewManager(gate.Config{
 		Enabled:    true,
 		TOTPSecret: "JBSWY3DPEHPK3PXP",
 	})
 	mcpSrv := server.NewMCPServer("test", "1.0.0")
-	RegisterGateTools(mcpSrv, gateMgr, tmpDir)
+	RegisterGateTools(mcpSrv, gateMgr)
 
 	setupTool := mcpSrv.GetTool("setup_2fa")
 
@@ -257,7 +255,7 @@ func TestSetup2FAWhenAlreadyEnabled(t *testing.T) {
 	// Calling unlock_gate when 2FA is disabled returns informative direct mode message
 	gateMgrDisable := gate.NewManager(gate.Config{Enabled: false})
 	mcpSrv2 := server.NewMCPServer("test2", "1.0.0")
-	RegisterGateTools(mcpSrv2, gateMgrDisable, tmpDir)
+	RegisterGateTools(mcpSrv2, gateMgrDisable)
 	unlockTool2 := mcpSrv2.GetTool("unlock_gate")
 
 	unlockReq := mcp.CallToolRequest{}

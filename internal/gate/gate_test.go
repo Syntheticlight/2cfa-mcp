@@ -217,32 +217,3 @@ func TestPersistEnvPreservesAuthToken(t *testing.T) {
 		t.Errorf("expected .env to preserve AUTH_TOKEN, got: %s", content)
 	}
 }
-
-func TestGateQRHandler(t *testing.T) {
-	mgr := NewManager(Config{Enabled: false})
-	h := NewHandler(mgr, "test-token")
-
-	// 1. No secret configured -> 404
-	req := httptest.NewRequest(http.MethodGet, "/gate/api/qr?token=test-token", nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected 404 for QR when no secret configured, got %d", rec.Code)
-	}
-
-	// 2. Secret pending -> 200 with image/png
-	_, _ = mgr.BeginSetup2FA("JBSWY3DPEHPK3PXP")
-	req = httptest.NewRequest(http.MethodGet, "/gate/api/qr?token=test-token", nil)
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 for QR with pending secret, got %d", rec.Code)
-	}
-	if rec.Header().Get("Content-Type") != "image/png" {
-		t.Errorf("expected image/png, got %s", rec.Header().Get("Content-Type"))
-	}
-	if rec.Body.Len() < 100 {
-		t.Errorf("expected non-empty PNG bytes, got %d bytes", rec.Body.Len())
-	}
-}

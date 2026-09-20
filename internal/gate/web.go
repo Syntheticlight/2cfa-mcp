@@ -3,12 +3,9 @@ package gate
 import (
 	"crypto/subtle"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
-	"github.com/skip2/go-qrcode"
 	"github.com/Syntheticlight/2cfa-mcp/internal/updater"
 )
 
@@ -57,8 +54,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleUnlock(w, r)
 	case "/gate/api/lock":
 		h.handleLock(w, r)
-	case "/gate/api/qr":
-		h.handleQR(w, r)
 	default:
 		h.handleDashboard(w, r)
 	}
@@ -145,34 +140,6 @@ func (h *Handler) handleLock(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "message": "Gate locked"})
 }
 
-
-func (h *Handler) handleQR(w http.ResponseWriter, r *http.Request) {
-	secret := h.manager.GetPendingSecret()
-	if secret == "" {
-		secret = h.manager.GetSecret()
-	}
-	if secret == "" {
-		http.Error(w, "2FA secret is not configured or pending", http.StatusNotFound)
-		return
-	}
-
-	nodeName, _ := os.Hostname()
-	if nodeName == "" {
-		nodeName = "edge"
-	}
-	uri := fmt.Sprintf("otpauth://totp/2cfa-mcp:%s?secret=%s&issuer=2cfa-mcp", nodeName, secret)
-
-	pngBytes, err := qrcode.Encode(uri, qrcode.Medium, 256)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to generate QR code: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(pngBytes)
-}
 
 func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
