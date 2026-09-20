@@ -140,7 +140,6 @@ func (h *Handler) handleLock(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "message": "Gate locked"})
 }
 
-
 func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(dashboardHTML))
