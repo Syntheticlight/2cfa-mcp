@@ -31,6 +31,12 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Headers", "*")
 		w.Header().Set("Access-Control-Expose-Headers", "*")
 
+		// Automatically disable proxy buffering in Nginx, Caddy, Cloudflare, Traefik, etc.
+		// Nginx natively honors "X-Accel-Buffering: no" to disable proxy_buffering automatically
+		// without requiring the user to manually configure "proxy_buffering off" in nginx.conf.
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.Header().Set("Cache-Control", "no-cache, no-transform")
+
 		// Allow CORS preflight OPTIONS requests without requiring authentication
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Max-Age", "86400")

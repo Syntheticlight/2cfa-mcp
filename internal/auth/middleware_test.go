@@ -113,3 +113,21 @@ func TestCORSPreflightOptions(t *testing.T) {
 		t.Errorf("missing Access-Control-Allow-Origin header")
 	}
 }
+func TestProxyBufferingDisabledHeaders(t *testing.T) {
+	mw := NewMiddleware("test-token")
+	handler := mw.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("X-Accel-Buffering") != "no" {
+		t.Errorf("expected X-Accel-Buffering: no, got '%s'", rec.Header().Get("X-Accel-Buffering"))
+	}
+	if rec.Header().Get("Cache-Control") != "no-cache, no-transform" {
+		t.Errorf("expected Cache-Control: no-cache, no-transform, got '%s'", rec.Header().Get("Cache-Control"))
+	}
+}
