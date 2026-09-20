@@ -56,7 +56,13 @@ echo " Workspace: ${WORKSPACE_PATH}"
 echo " 2FA Gate:  ${ENABLE_2FA_GATE}"
 echo "=========================================================================="
 
-# Android Termux Wake Lock Check
+# Android Termux Environment Setup & Wake Lock Check
+if [ -n "${PREFIX}" ] && [ -d "${PREFIX}/bin" ]; then
+    export PATH="${PREFIX}/bin:${PATH}"
+elif [ -d "/data/data/com.termux/files/usr/bin" ]; then
+    export PATH="/data/data/com.termux/files/usr/bin:${PATH}"
+fi
+
 if command -v termux-wake-lock >/dev/null 2>&1; then
     echo "[INFO] Termux detected! Acquiring wake-lock to prevent CPU sleep..."
     termux-wake-lock

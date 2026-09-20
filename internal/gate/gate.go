@@ -70,17 +70,28 @@ func NewManager(cfg Config) *Manager {
 }
 
 // Configure2FA dynamically updates the 2FA secret and enabled toggle via chat or API.
-func (m *Manager) Configure2FA(secret string, enable bool) {
+func (m *Manager) Configure2FA(secret string, enable bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if secret != "" {
+		if err := ValidateSecretFormat(secret); err != nil {
+			return err
+		}
 		m.totpSecret = strings.ToUpper(strings.ReplaceAll(secret, " ", ""))
 	}
 	m.enabled = enable
 	if !enable {
 		m.leases = make(map[string]*Lease)
 	}
+	return nil
+}
+
+// HasSecret returns whether a TOTP secret is configured.
+func (m *Manager) HasSecret() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.totpSecret != ""
 }
 
 // IsEnabled returns whether 2FA gate is currently active.
@@ -113,6 +124,7 @@ func (m *Manager) CreateLease(code string, durationMinutes int, clientIP, countr
 	}
 
 	now := time.Now()
+	m.purgeExpiredLeasesLocked(now)
 	token := generateSecureToken("lease_")
 
 	lease := &Lease{
@@ -190,20 +202,37 @@ func (m *Manager) Lock() {
 	m.leases = make(map[string]*Lease)
 }
 
+// purgeExpiredLeasesLocked cleans up expired leases from memory (caller must hold Lock).
+func (m *Manager) purgeExpiredLeasesLocked(now time.Time) {
+	for token, lease := range m.leases {
+		if !lease.ExpiresAt.IsZero() && now.After(lease.ExpiresAt) {
+			delete(m.leases, token)
+		}
+	}
+}
+
 // GetState returns clean dynamic status.
 func (m *Manager) GetState() StateInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	now := time.Now()
+	activeCount := 0
+	for _, lease := range m.leases {
+		if lease.ExpiresAt.IsZero() || !now.After(lease.ExpiresAt) {
+			activeCount++
+		}
+	}
+
 	info := StateInfo{
 		Enabled:           m.enabled,
 		HasSecret:         m.totpSecret != "",
-		ActiveLeasesCount: len(m.leases),
+		ActiveLeasesCount: activeCount,
 		Status:            "DISABLED",
 	}
 
 	if m.enabled {
-		if len(m.leases) > 0 {
+		if activeCount > 0 {
 			info.Status = "UNLOCKED"
 			info.Unlocked = true
 		} else {

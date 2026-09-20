@@ -164,3 +164,41 @@ func TestResolveShell(t *testing.T) {
 		}
 	}
 }
+
+func TestSetup2FAValidation(t *testing.T) {
+	gateMgr := gate.NewManager(gate.Config{Enabled: false})
+	mcpSrv := server.NewMCPServer("test", "1.0.0")
+	RegisterGateTools(mcpSrv, gateMgr)
+
+	setupTool := mcpSrv.GetTool("setup_2fa")
+
+	// 1. Enabling without any secret when none configured
+	reqNoSecret := mcp.CallToolRequest{}
+	reqNoSecret.Params.Name = "setup_2fa"
+	reqNoSecret.Params.Arguments = map[string]any{"enable": true}
+
+	res, err := setupTool.Handler(context.Background(), reqNoSecret)
+	if err != nil || !res.IsError {
+		t.Errorf("expected error when enabling 2FA without secret, got: %+v", res)
+	}
+
+	// 2. Enabling with invalid Base32
+	reqInvalid := mcp.CallToolRequest{}
+	reqInvalid.Params.Name = "setup_2fa"
+	reqInvalid.Params.Arguments = map[string]any{"enable": true, "secret": "INVALID_SECRET_WITH_888"}
+
+	res, err = setupTool.Handler(context.Background(), reqInvalid)
+	if err != nil || !res.IsError {
+		t.Errorf("expected error with invalid Base32, got: %+v", res)
+	}
+
+	// 3. Enabling with valid Base32
+	reqValid := mcp.CallToolRequest{}
+	reqValid.Params.Name = "setup_2fa"
+	reqValid.Params.Arguments = map[string]any{"enable": true, "secret": "JBSWY3DPEHPK3PXP"}
+
+	res, err = setupTool.Handler(context.Background(), reqValid)
+	if err != nil || res.IsError {
+		t.Errorf("expected success with valid secret, got: %+v", res)
+	}
+}

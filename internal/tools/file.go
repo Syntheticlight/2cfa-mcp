@@ -65,7 +65,10 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 
 		info, err := os.Stat(targetPath)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to stat file: %v", err)), nil
+			if os.IsNotExist(err) {
+				return mcp.NewToolResultError(fmt.Sprintf("file not found: %s", relPath)), nil
+			}
+			return mcp.NewToolResultError(fmt.Sprintf("failed to stat file: %s", relPath)), nil
 		}
 
 		if info.IsDir() {
@@ -78,7 +81,7 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 
 		content, err := os.ReadFile(targetPath)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to read file: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to read file '%s': permission denied or read error", relPath)), nil
 		}
 
 		gateMgr.AddAudit(gate.AuditEntry{
@@ -148,11 +151,11 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 		// Ensure parent directory exists
 		parentDir := filepath.Dir(targetPath)
 		if err := os.MkdirAll(parentDir, 0755); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to create directory structure: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to create directory structure for '%s'", relPath)), nil
 		}
 
 		if err := os.WriteFile(targetPath, []byte(content), 0644); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to write file: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("failed to write file '%s': permission denied or disk error", relPath)), nil
 		}
 
 		gateMgr.AddAudit(gate.AuditEntry{
@@ -212,7 +215,10 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 
 		entries, err := os.ReadDir(targetPath)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to read directory: %v", err)), nil
+			if os.IsNotExist(err) {
+				return mcp.NewToolResultError(fmt.Sprintf("directory not found: %s", relPath)), nil
+			}
+			return mcp.NewToolResultError(fmt.Sprintf("failed to read directory: %s", relPath)), nil
 		}
 
 		var sb strings.Builder

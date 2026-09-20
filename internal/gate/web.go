@@ -26,8 +26,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
 		authH := r.Header.Get("Authorization")
-		if strings.HasPrefix(authH, "Bearer ") {
-			token = strings.TrimSpace(strings.TrimPrefix(authH, "Bearer "))
+		if len(authH) > 7 && strings.EqualFold(authH[:7], "bearer ") {
+			token = strings.TrimSpace(authH[7:])
 		}
 	}
 

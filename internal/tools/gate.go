@@ -26,7 +26,13 @@ func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
 		}
 		secret := request.GetString("secret", "")
 
-		gateMgr.Configure2FA(secret, enable)
+		if enable && secret == "" && !gateMgr.HasSecret() {
+			return mcp.NewToolResultError("Cannot enable 2FA: No TOTP secret provided and none currently configured. Please provide 'secret' (e.g. your Google Authenticator Base32 secret string like JBSWY3DPEHPK3PXP)."), nil
+		}
+
+		if err := gateMgr.Configure2FA(secret, enable); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to configure 2FA: %v. Please provide a valid Base32 secret (A-Z, 2-7).", err)), nil
+		}
 
 		if enable {
 			return mcp.NewToolResultText("2FA Gate has been ENABLED. The server is now protected by Google Authenticator. Future tool calls will require unlocking via 'unlock_gate'."), nil
@@ -51,6 +57,11 @@ func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
 		}
 
 		durationMinutes := int(request.GetFloat("duration_minutes", 0))
+		if durationMinutes < 0 {
+			durationMinutes = 0
+		} else if durationMinutes > 525600 {
+			durationMinutes = 525600
+		}
 
 		token, err := gateMgr.CreateLease(code, durationMinutes, ip, country)
 		duration := time.Since(start).Milliseconds()

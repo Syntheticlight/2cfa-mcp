@@ -3,6 +3,7 @@ package gate
 import (
 	"crypto/hmac"
 	"crypto/sha1"
+	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
 	"errors"
@@ -15,6 +16,19 @@ const (
 	TOTPPeriod = 30 // 30 seconds interval per RFC 6238
 	TOTPDigits = 6  // 6 digits
 )
+
+// ValidateSecretFormat checks whether a string is a valid Base32 secret.
+func ValidateSecretFormat(secret string) error {
+	cleanSecret := strings.ToUpper(strings.ReplaceAll(secret, " ", ""))
+	if cleanSecret == "" {
+		return errors.New("TOTP secret is empty")
+	}
+	_, err := decodeBase32(cleanSecret)
+	if err != nil {
+		return fmt.Errorf("invalid base32 secret: %w", err)
+	}
+	return nil
+}
 
 // ValidateTOTP validates a 6-digit TOTP code against a Base32 secret string.
 // Allows a +/- 1 step drift window (total 90 seconds window).
@@ -29,12 +43,13 @@ func ValidateTOTP(secretBase32, inputCode string, t time.Time) (bool, error) {
 		return false, fmt.Errorf("invalid base32 secret: %w", err)
 	}
 
+	cleanInput := strings.TrimSpace(inputCode)
 	currentStep := t.Unix() / TOTPPeriod
 
 	// Check current step, previous step (-1), and next step (+1) for clock drift
 	for stepOffset := int64(-1); stepOffset <= 1; stepOffset++ {
 		expectedCode := generateHOTP(key, uint64(currentStep+stepOffset), TOTPDigits)
-		if expectedCode == strings.TrimSpace(inputCode) {
+		if subtle.ConstantTimeCompare([]byte(expectedCode), []byte(cleanInput)) == 1 {
 			return true, nil
 		}
 	}
@@ -59,9 +74,9 @@ func GenerateCurrentTOTP(secretBase32 string, t time.Time) (string, error) {
 }
 
 func decodeBase32(s string) ([]byte, error) {
-	// Add padding if missing
-	padLen := (8 - (len(s) % 8)) % 8
-	padded := s + strings.Repeat("=", padLen)
+	unpadded := strings.TrimRight(s, "=")
+	padLen := (8 - (len(unpadded) % 8)) % 8
+	padded := unpadded + strings.Repeat("=", padLen)
 	return base32.StdEncoding.DecodeString(padded)
 }
 

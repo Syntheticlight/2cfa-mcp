@@ -2,6 +2,7 @@ package gate
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -99,5 +100,19 @@ func TestResolveClientIP(t *testing.T) {
 	ip, country = ResolveClientIP(req)
 	if ip != "203.0.113.195" || country != "SG" {
 		t.Errorf("unexpected CF IP/country: %s/%s", ip, country)
+	}
+}
+
+func TestGateHandlerCaseInsensitiveBearer(t *testing.T) {
+	mgr := NewManager(Config{Enabled: false})
+	h := NewHandler(mgr, "test-secret-token")
+
+	req, _ := http.NewRequest(http.MethodGet, "/gate/api/status", nil)
+	req.Header.Set("Authorization", "bearer test-secret-token")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 with lowercase bearer token, got %d", rec.Code)
 	}
 }

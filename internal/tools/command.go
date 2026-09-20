@@ -79,9 +79,9 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 		timeout := defaultTimeout
 		tSec := request.GetFloat("timeout_seconds", 0)
 		if tSec > 0 {
-			timeout = time.Duration(tSec) * time.Second
-		} else if tSec == -1 {
-			timeout = 0 // unlimited
+			timeout = time.Duration(tSec * float64(time.Second))
+		} else if tSec < 0 {
+			timeout = 0 // any negative value (e.g. -1) indicates unlimited execution
 		}
 
 		var execCtx context.Context
