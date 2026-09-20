@@ -142,7 +142,6 @@ func TestProxyBufferingDisabledHeaders(t *testing.T) {
 	}
 }
 
-
 func TestCanonicalClientIdentityRejectsSpoofedProxyHeadersFromPublicPeer(t *testing.T) {
 	mw := NewMiddleware("test-token")
 	var gotIP, gotCountry string
