@@ -132,6 +132,10 @@ func getEnvBool(key string, defaultVal bool) bool {
 func loadDotEnv(paths ...string) string {
 	for _, p := range paths {
 		if data, err := os.ReadFile(p); err == nil {
+			// Best-effort hardening for secrets created from .env.example on
+			// multi-user Linux hosts. Termux is already app-sandboxed.
+			_ = os.Chmod(p, 0600)
+
 			lines := strings.Split(string(data), "\n")
 			for _, line := range lines {
 				line = strings.TrimSpace(line)
@@ -142,7 +146,11 @@ func loadDotEnv(paths ...string) string {
 				k := strings.TrimSpace(parts[0])
 				v := strings.TrimSpace(parts[1])
 				v = strings.Trim(v, "\"'")
-				_ = os.Setenv(k, v)
+				// Conventional precedence: explicit process environment wins
+				// over .env. This also matches the comment above main().
+				if _, exists := os.LookupEnv(k); !exists {
+					_ = os.Setenv(k, v)
+				}
 			}
 			abs, err := filepath.Abs(p)
 			if err == nil {
