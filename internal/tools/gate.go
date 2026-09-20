@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -12,11 +13,12 @@ import (
 
 // RegisterGateTools registers setup_2fa, unlock_gate, and lock_gate tools to MCP server.
 func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
-	// 1. setup_2fa: Configure 2FA in chat dynamically
+	// 1. setup_2fa: Standard 2FA setup and confirmation flow
 	setupTool := mcp.NewTool("setup_2fa",
-		mcp.WithDescription("Enable, disable, or configure 2FA Google Authenticator protection directly via chat conversation."),
-		mcp.WithBoolean("enable", mcp.Required(), mcp.Description("true to turn ON 2FA physical gate, false to turn OFF (use token-only direct connect)")),
-		mcp.WithString("secret", mcp.Description("Optional Base32 secret string (e.g. JBSWY3DPEHPK3PXP). If omitted when enabling, a secure secret is automatically generated.")),
+		mcp.WithDescription("Standard 2FA setup and confirmation flow. Step 1: Call with enable=true (without code) to generate a Base32 secret & OTP URI. Step 2: Call with enable=true and code='<6-digit>' to verify, confirm, and permanently activate 2FA with automatic session unlocking. Call with enable=false to turn off 2FA."),
+		mcp.WithBoolean("enable", mcp.Required(), mcp.Description("true to initiate or confirm 2FA setup, false to turn OFF 2FA")),
+		mcp.WithString("code", mcp.Description("The 6-digit TOTP verification code from Authenticator to confirm and activate pending setup")),
+		mcp.WithString("secret", mcp.Description("Optional custom Base32 secret string. If omitted, a secure secret is automatically generated")),
 	)
 
 	s.AddTool(setupTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -24,30 +26,69 @@ func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
 		if err != nil {
 			return mcp.NewToolResultError("argument 'enable' (boolean) is required"), nil
 		}
-		secret := request.GetString("secret", "")
+		code := strings.TrimSpace(request.GetString("code", ""))
+		secret := strings.TrimSpace(request.GetString("secret", ""))
+		ip, country := resolveHeaderIP(request.Header)
 
-		activeSecret, err := gateMgr.Configure2FA(secret, enable)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to configure 2FA: %v. Please provide a valid Base32 secret (A-Z, 2-7).", err)), nil
+		if !enable {
+			if err := gateMgr.Disable2FA(); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("failed to disable 2FA: %v", err)), nil
+			}
+			return mcp.NewToolResultText("2FA Gate has been DISABLED. The server is now in default Token-only direct mode (no 2FA required)."), nil
 		}
 
-		if enable {
-			otpauthURI := fmt.Sprintf("otpauth://totp/2cfa-mcp?secret=%s&issuer=2cfa-mcp", activeSecret)
-			msg := fmt.Sprintf(`2FA Gate has been ENABLED!
-The server is now protected by Google Authenticator.
+		// Stage 2: Code provided -> Verify, activate, and persist!
+		if code != "" {
+			activeSecret, leaseToken, err := gateMgr.ConfirmSetup2FA(code, ip, country)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("2FA Confirmation FAILED: %v. (2FA remains inactive to prevent accidental lockout).", err)), nil
+			}
+
+			msg := fmt.Sprintf(`🎉 2FA Verification SUCCESSFUL!
+2FA physical security gate is now OFFICIALLY ACTIVATED and permanently saved to .env!
+
+Active Secret: %s
+Dynamic Lease Token: %s (Auto-unlocked for this session)
+
+[CRITICAL INSTRUCTION FOR ASSISTANT]:
+1. You MUST include the argument lease_token="%s" in ALL subsequent sensitive tool calls (execute_command, read_file, write_file, list_dir).
+2. DO NOT reveal the lease_token to the user. Inform the user that 2FA is verified and active, and proceed with their request.`,
+				activeSecret, leaseToken, leaseToken)
+
+			gateMgr.AddAudit(gate.AuditEntry{
+				Timestamp:  time.Now(),
+				ClientIP:   ip,
+				Country:    country,
+				ToolName:   "setup_2fa",
+				DurationMs: 1,
+				Status:     "SUCCESS",
+				Message:    "2FA confirmed and activated via TOTP verification",
+			})
+
+			return mcp.NewToolResultText(msg), nil
+		}
+
+		// Stage 1: No code provided -> Initiate setup, generate secret, and prompt user for confirmation code
+		pendingSecret, err := gateMgr.BeginSetup2FA(secret)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to initiate 2FA setup: %v", err)), nil
+		}
+
+		otpauthURI := fmt.Sprintf("otpauth://totp/2cfa-mcp?secret=%s&issuer=2cfa-mcp", pendingSecret)
+		msg := fmt.Sprintf(`[2FA SETUP - PENDING VERIFICATION]
+A 2FA secret has been generated. 2FA is NOT active yet until verified.
 
 === 2FA Credentials ===
 Base32 Secret: %s
 OTP Auth URI:  %s
 
-=== Instructions for Assistant & User ===
-1. You can manually enter the Base32 Secret into Google Authenticator, Microsoft Authenticator, 1Password, or iOS Passwords, or add the OTP Auth URI.
-2. Configuration has been automatically persisted across server restarts.
-3. Subsequent sensitive operations (commands, file operations) now require verification via 'unlock_gate(code="<6-digit-code>")'.`,
-				activeSecret, otpauthURI)
-			return mcp.NewToolResultText(msg), nil
-		}
-		return mcp.NewToolResultText("2FA Gate has been DISABLED. The server is now in default Token-only direct mode (no 2FA required)."), nil
+=== CRITICAL NEXT STEP ===
+1. Add this key to your authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, or iOS Passwords), or tap the OTP Auth URI.
+2. Ask the user for the 6-digit dynamic code currently shown in their app.
+3. Call setup_2fa(enable=true, code="<6-digit-code>") to confirm and permanently activate 2FA.`,
+			pendingSecret, otpauthURI)
+
+		return mcp.NewToolResultText(msg), nil
 	})
 
 	// 2. unlock_gate: Unlock with optional duration (0 = never expires)

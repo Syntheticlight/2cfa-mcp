@@ -215,11 +215,18 @@ https://xxx-xxx-xxx.trycloudflare.com
 
 ---
 
-### 2. 对话中动态开启 2FA 门禁
-当服务暴露在公网，或打算借给同事朋友使用时，随时在聊天中升级防护：
-> **用户**：“帮我开启 2FA 门禁，密钥是 `JBSWY3DPEHPK3PXP`。”  
-> **ChatGPT**：*（调用 `setup_2fa(enable=true, secret="JBSWY3DPEHPK3PXP")`）*  
-> 🔒 **2FA 物理门禁已成功激活！** 后续所有命令执行和文件读写操作均需动态验证码解锁。
+### 2. 对话中动态开启 2FA 门禁（标准两步验证防锁死流程）
+当服务暴露在公网，或打算借给他人使用时，随时在聊天中安全开启，无需预先生成密钥：
+> **用户**：“帮我开启 2FA 门禁。”  
+> **ChatGPT**：*（调用 `setup_2fa(enable=true)` 毫秒级自生成密钥）*  
+> 🔑 **2FA 密钥已生成（待验证确认）！**  
+> - **Base32 密钥**：`WM3H23RKVLQOOZ2GQO52VTEL7Y5H3DCB`  
+> - **绑定链接**：`otpauth://totp/2cfa-mcp?secret=WM3H23...&issuer=2cfa-mcp`  
+> 请将密钥添加到 Google Authenticator 或其他验证器，并将显示的 6 位验证码发给我以完成最终激活。  
+>  
+> **用户**：“验证码是 482910”  
+> **ChatGPT**：*（调用 `setup_2fa(enable=true, code="482910")` 校验通过，自动持久化写回 `.env`）*  
+> 🎉 **2FA 验证成功，门禁已正式激活并永久保存！** 当前会话已自动完成首次开闸，您可以直接执行后续任务。
 
 ---
 

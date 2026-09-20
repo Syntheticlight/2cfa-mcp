@@ -46,13 +46,15 @@ type StateInfo struct {
 
 // Manager manages the 2FA lifecycle, leases, and audit logs.
 type Manager struct {
-	mu         sync.RWMutex
-	enabled    bool
-	totpSecret string
-	envPath    string
-	leases     map[string]*Lease
-	auditRing  []AuditEntry
-	maxAudits  int
+	mu            sync.RWMutex
+	enabled       bool
+	totpSecret    string
+	pendingSecret string
+	pendingAt     time.Time
+	envPath       string
+	leases        map[string]*Lease
+	auditRing     []AuditEntry
+	maxAudits     int
 }
 
 // Config holds Gate Manager initialization options.
@@ -80,10 +82,96 @@ func NewManager(cfg Config) *Manager {
 	}
 }
 
-// Configure2FA dynamically updates the 2FA secret and enabled toggle via chat or API.
-// If enable is true and secret is empty, it automatically generates a secure 160-bit Base32 secret.
-// Automatically persists changes to .env file if available.
-// Returns the active Base32 secret string.
+// BeginSetup2FA initiates the 2FA setup process without locking the user out.
+// Generates or validates a Base32 secret and puts it in pending state.
+func (m *Manager) BeginSetup2FA(customSecret string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	secret := strings.TrimSpace(customSecret)
+	if secret != "" {
+		if err := ValidateSecretFormat(secret); err != nil {
+			return "", err
+		}
+		secret = strings.ToUpper(strings.ReplaceAll(secret, " ", ""))
+	} else {
+		sec, err := GenerateRandomSecret()
+		if err != nil {
+			return "", err
+		}
+		secret = sec
+	}
+
+	m.pendingSecret = secret
+	m.pendingAt = time.Now()
+	return secret, nil
+}
+
+// ConfirmSetup2FA verifies the 6-digit TOTP code against the pending secret.
+// If valid: activates 2FA, persists to .env, and issues an immediate lease token for the current session.
+func (m *Manager) ConfirmSetup2FA(code, clientIP, country string) (string, string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.pendingSecret == "" {
+		return "", "", errors.New("no pending 2FA setup in progress. Please call setup_2fa without code first to generate a secret")
+	}
+
+	valid, err := ValidateTOTP(m.pendingSecret, code, time.Now())
+	if err != nil {
+		return "", "", fmt.Errorf("verification error: %w", err)
+	}
+	if !valid {
+		return "", "", errors.New("invalid verification code. Please make sure the key was added correctly to your authenticator app and try again")
+	}
+
+	// Verification succeeded! Officially activate 2FA and persist
+	m.totpSecret = m.pendingSecret
+	m.pendingSecret = ""
+	m.enabled = true
+
+	if m.envPath != "" {
+		updates := map[string]string{
+			"ENABLE_2FA_GATE": "true",
+			"TOTP_SECRET":     m.totpSecret,
+		}
+		_ = PersistEnv(m.envPath, updates)
+	}
+
+	// Issue first dynamic lease token so the user is immediately unlocked for this session
+	now := time.Now()
+	token := generateSecureToken("lease_")
+	m.leases[token] = &Lease{
+		Token:           token,
+		CreatedAt:       now,
+		LastActivityAt:  now,
+		DurationMinutes: 0,
+		ClientIP:        clientIP,
+		Country:         country,
+	}
+
+	return m.totpSecret, token, nil
+}
+
+// Disable2FA disables 2FA, revokes all leases, and updates .env.
+func (m *Manager) Disable2FA() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.enabled = false
+	m.pendingSecret = ""
+	m.leases = make(map[string]*Lease)
+
+	if m.envPath != "" {
+		updates := map[string]string{
+			"ENABLE_2FA_GATE": "false",
+		}
+		_ = PersistEnv(m.envPath, updates)
+	}
+	return nil
+}
+
+// Configure2FA is a direct configuration method (backward-compatible).
 func (m *Manager) Configure2FA(secret string, enable bool) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -110,7 +198,6 @@ func (m *Manager) Configure2FA(secret string, enable bool) (string, error) {
 		m.leases = make(map[string]*Lease)
 	}
 
-	// Auto-persist to .env if envPath is available
 	if m.envPath != "" {
 		updates := map[string]string{
 			"ENABLE_2FA_GATE": fmt.Sprintf("%t", enable),
@@ -136,6 +223,13 @@ func (m *Manager) GetSecret() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.totpSecret
+}
+
+// GetPendingSecret returns the pending TOTP secret if any.
+func (m *Manager) GetPendingSecret() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.pendingSecret
 }
 
 // IsEnabled returns whether 2FA gate is currently active.
@@ -193,17 +287,14 @@ func (m *Manager) ValidateLease(token string) (bool, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 1. If 2FA is disabled, direct access granted!
 	if !m.enabled {
 		return true, ""
 	}
 
 	now := time.Now()
 
-	// 2. Check Lease Token
 	if token != "" {
 		if lease, exists := m.leases[token]; exists {
-			// Check expiration if duration was specified (> 0)
 			if !lease.ExpiresAt.IsZero() && now.After(lease.ExpiresAt) {
 				delete(m.leases, token)
 				return false, "SECURITY GATE: 2FA Lease time limit expired. Please unlock again."
@@ -325,12 +416,10 @@ func ResolveClientIP(r *http.Request) (string, string) {
 		country = "LOCAL"
 	}
 
-	// 1. Cloudflare connecting IP
 	if cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfIP != "" {
 		return cfIP, country
 	}
 
-	// 2. X-Forwarded-For (first hop)
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
 		if len(parts) > 0 {
@@ -341,12 +430,10 @@ func ResolveClientIP(r *http.Request) (string, string) {
 		}
 	}
 
-	// 3. X-Real-IP
 	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
 		return xri, country
 	}
 
-	// 4. RemoteAddr
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil && host != "" {
 		return host, country
@@ -391,7 +478,6 @@ func PersistEnv(filePath string, updates map[string]string) error {
 		}
 	}
 
-	// Append any new keys that were not present in existing .env
 	for key, val := range updates {
 		if !foundKeys[key] {
 			lines = append(lines, fmt.Sprintf("%s=%s", key, val))

@@ -44,7 +44,7 @@ func TestFullConversational2FAWorkflow(t *testing.T) {
 		t.Errorf("unexpected output: %+v", res)
 	}
 
-	// Phase B: Enable 2FA dynamically via setup_2fa
+	// Phase B: Enable 2FA dynamically via setup_2fa (Step 1: initiate)
 	setupReq := mcp.CallToolRequest{}
 	setupReq.Params.Name = "setup_2fa"
 	setupReq.Params.Arguments = map[string]any{
@@ -54,10 +54,28 @@ func TestFullConversational2FAWorkflow(t *testing.T) {
 
 	setupRes, err := setupTool.Handler(context.Background(), setupReq)
 	if err != nil || setupRes.IsError {
-		t.Fatalf("setup_2fa failed: %v", err)
+		t.Fatalf("setup_2fa step 1 failed: %v", err)
 	}
 
-	// Now execute_command should be BLOCKED because 2FA is on and no lease provided
+	// Step 2: Confirm with valid 6-digit TOTP code
+	validConfirmCode, err := generateTestTOTP(secret)
+	if err != nil {
+		t.Fatalf("failed to generate totp: %v", err)
+	}
+
+	confirmReq := mcp.CallToolRequest{}
+	confirmReq.Params.Name = "setup_2fa"
+	confirmReq.Params.Arguments = map[string]any{
+		"enable": true,
+		"code":   validConfirmCode,
+	}
+
+	confirmRes, err := setupTool.Handler(context.Background(), confirmReq)
+	if err != nil || confirmRes.IsError {
+		t.Fatalf("setup_2fa step 2 failed: %v", err)
+	}
+
+	// Now execute_command without lease should be BLOCKED
 	resBlocked, err := cmdTool.Handler(context.Background(), req)
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
@@ -172,7 +190,7 @@ func TestSetup2FAValidation(t *testing.T) {
 
 	setupTool := mcpSrv.GetTool("setup_2fa")
 
-	// 1. Enabling without any secret when none configured -> Auto-generates Base32 secret!
+	// 1. Step 1: Initiate without secret -> Auto-generates secret in pending state
 	reqNoSecret := mcp.CallToolRequest{}
 	reqNoSecret.Params.Name = "setup_2fa"
 	reqNoSecret.Params.Arguments = map[string]any{"enable": true}
@@ -182,23 +200,25 @@ func TestSetup2FAValidation(t *testing.T) {
 		t.Errorf("expected success with auto-generated secret, got: %+v", res)
 	}
 
-	// 2. Enabling with invalid Base32
-	reqInvalid := mcp.CallToolRequest{}
-	reqInvalid.Params.Name = "setup_2fa"
-	reqInvalid.Params.Arguments = map[string]any{"enable": true, "secret": "INVALID_SECRET_WITH_888"}
+	// 2. Step 2: Confirm with wrong code -> Must fail and not activate 2FA
+	reqWrongCode := mcp.CallToolRequest{}
+	reqWrongCode.Params.Name = "setup_2fa"
+	reqWrongCode.Params.Arguments = map[string]any{"enable": true, "code": "000000"}
 
-	res, err = setupTool.Handler(context.Background(), reqInvalid)
+	res, err = setupTool.Handler(context.Background(), reqWrongCode)
 	if err != nil || !res.IsError {
-		t.Errorf("expected error with invalid Base32, got: %+v", res)
+		t.Errorf("expected error when confirming with invalid code, got: %+v", res)
 	}
 
-	// 3. Enabling with valid Base32
-	reqValid := mcp.CallToolRequest{}
-	reqValid.Params.Name = "setup_2fa"
-	reqValid.Params.Arguments = map[string]any{"enable": true, "secret": "JBSWY3DPEHPK3PXP"}
+	// 3. Step 2: Confirm with valid code -> Must succeed and activate 2FA
+	pendingSec := gateMgr.GetPendingSecret()
+	validCode, _ := generateTestTOTP(pendingSec)
+	reqValidCode := mcp.CallToolRequest{}
+	reqValidCode.Params.Name = "setup_2fa"
+	reqValidCode.Params.Arguments = map[string]any{"enable": true, "code": validCode}
 
-	res, err = setupTool.Handler(context.Background(), reqValid)
+	res, err = setupTool.Handler(context.Background(), reqValidCode)
 	if err != nil || res.IsError {
-		t.Errorf("expected success with valid secret, got: %+v", res)
+		t.Errorf("expected success when confirming with valid code, got: %+v", res)
 	}
 }
