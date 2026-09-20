@@ -14,7 +14,7 @@ func TestVersionComparison(t *testing.T) {
 		{"v1.0.1", "v1.0.2", true},
 		{"v1.0.2", "v1.0.2", false},
 		{"v1.0.2", "v1.0.1", false},
-		{"1.0.2", "v1.0.3", true},
+		{"1.0.3", "v1.0.4", true},
 		{"v1.0.2", "v1.1.0", true},
 		{"v1.0.2", "v2.0.0", true},
 		{"v2.0.0", "v1.9.9", false},

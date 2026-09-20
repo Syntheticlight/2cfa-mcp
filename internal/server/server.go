@@ -47,7 +47,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	}
 
 	mcpSrv := server.NewMCPServer(
-		"2cfa-mcp", "1.0.3",
+		"2cfa-mcp", "1.0.4",
 		server.WithDescription("High-security, low-memory remote MCP Server for edge devices"),
 	)
 
@@ -112,8 +112,8 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	// MCP endpoints handler wrapper
 	mcpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clientIP, country := gate.ResolveClientIP(r)
-		sanitizedPath := auth.SanitizeURL(r.URL.Path, cfg.AuthToken)
-		log.Printf("[REQ] %s %s from %s [%s]", r.Method, sanitizedPath, clientIP, country)
+		sanitizedURI := auth.SanitizeURL(r.URL.RequestURI(), cfg.AuthToken)
+		log.Printf("[REQ] %s %s from %s [%s]", r.Method, sanitizedURI, clientIP, country)
 
 		cleanPath := strings.TrimRight(r.URL.Path, "/")
 
