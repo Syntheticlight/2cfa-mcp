@@ -73,9 +73,9 @@ type Manager struct {
 	auditRing     []AuditEntry
 	maxAudits     int
 
-	totpAttempts  map[string]*totpAttemptState
+	totpAttempts   map[string]*totpAttemptState
 	globalFailures []time.Time
-	usedTOTPSteps map[string]time.Time
+	usedTOTPSteps  map[string]time.Time
 }
 
 // Config holds Gate Manager initialization options.
@@ -94,15 +94,15 @@ func NewManager(cfg Config) *Manager {
 		}
 	}
 	return &Manager{
-		enabled:    cfg.Enabled,
-		totpSecret: cfg.TOTPSecret,
-		envPath:    envPath,
+		enabled:        cfg.Enabled,
+		totpSecret:     cfg.TOTPSecret,
+		envPath:        envPath,
 		leases:         make(map[string]*Lease),
-		maxAudits:       20,
-		auditRing:       make([]AuditEntry, 0, 20),
-		totpAttempts:    make(map[string]*totpAttemptState),
-		usedTOTPSteps:   make(map[string]time.Time),
-		globalFailures:  make([]time.Time, 0, totpGlobalFailureLimit),
+		maxAudits:      20,
+		auditRing:      make([]AuditEntry, 0, 20),
+		totpAttempts:   make(map[string]*totpAttemptState),
+		usedTOTPSteps:  make(map[string]time.Time),
+		globalFailures: make([]time.Time, 0, totpGlobalFailureLimit),
 	}
 }
 
