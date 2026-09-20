@@ -35,4 +35,4 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 run: build
-	./$(BUILD_DIR)/$(BINARY_NAME) -token=dev-token-12345
+	AUTH_TOKEN=dev-token-12345 ./$(BUILD_DIR)/$(BINARY_NAME)
