@@ -1,6 +1,6 @@
 module github.com/Syntheticlight/2cfa-mcp
 
-go 1.26.1
+go 1.25.5
 
 require github.com/mark3labs/mcp-go v1.1.0
 
