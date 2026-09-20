@@ -47,6 +47,7 @@ type StateInfo struct {
 }
 
 const (
+	pendingSetupTTL        = 15 * time.Minute
 	totpFailureWindow      = 5 * time.Minute
 	totpClientFailureLimit = 5
 	totpGlobalFailureLimit = 25
@@ -149,6 +150,11 @@ func (m *Manager) ConfirmSetup2FA(code, clientIP, country string) (string, strin
 	if m.pendingSecret == "" {
 		return "", "", errors.New("no pending 2FA setup in progress. Please call setup_2fa without code first to generate a secret")
 	}
+	if m.pendingAt.IsZero() || time.Since(m.pendingAt) > pendingSetupTTL {
+		m.pendingSecret = ""
+		m.pendingAt = time.Time{}
+		return "", "", errors.New("pending 2FA setup expired; start setup again")
+	}
 
 	valid, err := m.validateAndConsumeTOTPLocked(m.pendingSecret, code, clientIP)
 	if err != nil {
@@ -180,7 +186,11 @@ func (m *Manager) ConfirmSetup2FA(code, clientIP, country string) (string, strin
 	// first dynamic lease token so the current session remains usable.
 	m.totpSecret = newSecret
 	m.pendingSecret = ""
+	m.pendingAt = time.Time{}
 	m.enabled = true
+	// Rotating the second factor revokes every lease minted under the previous
+	// configuration. Only the newly-issued session lease survives.
+	m.leases = make(map[string]*Lease)
 
 	now := time.Now()
 	m.leases[token] = &Lease{
