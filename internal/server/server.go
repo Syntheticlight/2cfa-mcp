@@ -67,6 +67,12 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		mcpSrv,
 		server.WithSSEDisableLocalhostProtection(true),
 		server.WithAppendQueryToMessageEndpoint(),
+		server.WithSSECORS(
+			server.WithCORSAllowedOrigins("*"),
+			server.WithCORSAllowedMethods("GET", "POST", "OPTIONS", "DELETE", "HEAD"),
+			server.WithCORSAllowedHeaders("*"),
+			server.WithCORSExposedHeaders("*"),
+		),
 		server.WithDynamicBasePath(func(r *http.Request, sessionID string) string {
 			if strings.HasPrefix(r.URL.Path, "/mcp/") {
 				parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/mcp/"), "/")
@@ -82,6 +88,12 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	streamableSrv := server.NewStreamableHTTPServer(
 		mcpSrv,
 		server.WithDisableLocalhostProtection(true),
+		server.WithStreamableHTTPCORS(
+			server.WithCORSAllowedOrigins("*"),
+			server.WithCORSAllowedMethods("GET", "POST", "OPTIONS", "DELETE", "HEAD"),
+			server.WithCORSAllowedHeaders("*"),
+			server.WithCORSExposedHeaders("*"),
+		),
 	)
 
 	mux := http.NewServeMux()
@@ -101,14 +113,19 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		sanitizedPath := auth.SanitizeURL(r.URL.Path, cfg.AuthToken)
 		log.Printf("[REQ] %s %s from %s [%s]", r.Method, sanitizedPath, clientIP, country)
 
-		// Direct routing for SSE stream
-		if strings.HasSuffix(r.URL.Path, "/sse") || r.URL.Path == "/sse" {
+		cleanPath := strings.TrimRight(r.URL.Path, "/")
+
+		// Direct routing for SSE stream:
+		// Handles: /sse, /sse/, /mcp/<TOKEN>/sse, /mcp/<TOKEN>/sse/
+		// Or any GET request requesting text/event-stream (e.g. ChatGPT connecting directly to /mcp/<TOKEN>)
+		if strings.HasSuffix(cleanPath, "/sse") || cleanPath == "/sse" ||
+			(r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept"), "text/event-stream") && !strings.Contains(cleanPath, "/message")) {
 			sseSrv.SSEHandler().ServeHTTP(w, r)
 			return
 		}
 
 		// Direct routing for SSE Message endpoint
-		if strings.Contains(r.URL.Path, "/message") {
+		if strings.Contains(cleanPath, "/message") {
 			sseSrv.MessageHandler().ServeHTTP(w, r)
 			return
 		}
@@ -120,6 +137,9 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 				r.URL.Path = trimmedPath[idx:]
 			} else {
 				r.URL.Path = "/"
+			}
+			if r.URL.RawPath != "" {
+				r.URL.RawPath = r.URL.Path
 			}
 		}
 

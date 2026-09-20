@@ -94,3 +94,22 @@ func TestSanitizeURL(t *testing.T) {
 		t.Errorf("unexpected sanitized output: %s", sanitized)
 	}
 }
+
+func TestCORSPreflightOptions(t *testing.T) {
+	mw := NewMiddleware("test-token")
+	handler := mw.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/mcp/random/message", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for OPTIONS preflight, got %d", rec.Code)
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Errorf("missing Access-Control-Allow-Origin header")
+	}
+}

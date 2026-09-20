@@ -25,6 +25,19 @@ func NewMiddleware(token string) *Middleware {
 // 3. URL path prefix/segment matching /mcp/<TOKEN>/...
 func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers for all requests (essential for browser-based clients like ChatGPT Web)
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE, HEAD")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+		w.Header().Set("Access-Control-Expose-Headers", "*")
+
+		// Allow CORS preflight OPTIONS requests without requiring authentication
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Max-Age", "86400")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		// Public endpoints or gate handler bypass authentication
 		if r.URL.Path == "/health" || r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/gate") {
 			next.ServeHTTP(w, r)

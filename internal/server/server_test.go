@@ -159,3 +159,46 @@ func TestCloudflareTunnelReverseProxyHostProtectionDisabled(t *testing.T) {
 		t.Errorf("expected text/event-stream, got %s", rec.Header().Get("Content-Type"))
 	}
 }
+
+func TestSSERoutingTrailingSlashAndDirectAccept(t *testing.T) {
+	tmpDir := t.TempDir()
+	token := "trailing-test-token"
+	cfg := ServerConfig{
+		Port:          2232,
+		AuthToken:     token,
+		WorkspacePath: tmpDir,
+		ExecTimeout:   120 * time.Second,
+	}
+
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// 1. Trailing slash on SSE: /mcp/<TOKEN>/sse/
+	req := httptest.NewRequest(http.MethodGet, "/mcp/"+token+"/sse/", nil)
+	ctx, cancel := context.WithTimeout(req.Context(), 100*time.Millisecond)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	srv.httpSrv.Handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Content-Type") != "text/event-stream" {
+		t.Errorf("expected text/event-stream for trailing slash, got %s", rec.Header().Get("Content-Type"))
+	}
+
+	// 2. Direct path without /sse but with Accept: text/event-stream
+	reqDirect := httptest.NewRequest(http.MethodGet, "/mcp/"+token, nil)
+	reqDirect.Header.Set("Accept", "text/event-stream")
+	ctx2, cancel2 := context.WithTimeout(reqDirect.Context(), 100*time.Millisecond)
+	defer cancel2()
+	reqDirect = reqDirect.WithContext(ctx2)
+
+	recDirect := httptest.NewRecorder()
+	srv.httpSrv.Handler.ServeHTTP(recDirect, reqDirect)
+
+	if recDirect.Header().Get("Content-Type") != "text/event-stream" {
+		t.Errorf("expected text/event-stream for direct accept header, got %s", recDirect.Header().Get("Content-Type"))
+	}
+}

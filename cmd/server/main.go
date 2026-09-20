@@ -15,6 +15,17 @@ import (
 	"github.com/Syntheticlight/2cfa-mcp/internal/server"
 )
 
+func init() {
+	// Auto-inject Termux user bin into PATH on Android / Linux edge devices if present
+	termuxBin := "/data/data/com.termux/files/usr/bin"
+	if _, err := os.Stat(termuxBin); err == nil {
+		path := os.Getenv("PATH")
+		if !strings.Contains(path, termuxBin) {
+			_ = os.Setenv("PATH", termuxBin+":"+path)
+		}
+	}
+}
+
 func main() {
 	// Parse CLI flags and environment variables
 	portFlag := flag.Int("port", getEnvInt("PORT", 2232), "Server listening port")
