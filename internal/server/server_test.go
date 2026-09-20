@@ -258,3 +258,23 @@ func TestOversizedGateRequestRejected(t *testing.T) {
 		t.Fatalf("expected %d for oversized gate body, got %d", http.StatusRequestEntityTooLarge, rec.Code)
 	}
 }
+
+func TestHTTPTimeoutsSupportLongLivedSSE(t *testing.T) {
+	tmpDir := t.TempDir()
+	srv, err := NewServer(ServerConfig{
+		Port:          2232,
+		AuthToken:     "timeout-test-token",
+		WorkspacePath: tmpDir,
+		ExecTimeout:   120 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	if srv.httpSrv.WriteTimeout != 0 {
+		t.Fatalf("SSE requires no global write timeout, got %s", srv.httpSrv.WriteTimeout)
+	}
+	if srv.httpSrv.ReadHeaderTimeout != 15*time.Second {
+		t.Fatalf("expected 15s read-header timeout, got %s", srv.httpSrv.ReadHeaderTimeout)
+	}
+}
