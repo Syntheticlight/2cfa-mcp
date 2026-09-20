@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	CurrentVersion = "v1.0.4"
+	CurrentVersion = "v1.0.5"
 	RepoOwner      = "Syntheticlight"
 	RepoName       = "2cfa-mcp"
 	GitHubAPIURL   = "https://api.github.com/repos/Syntheticlight/2cfa-mcp/releases/latest"
