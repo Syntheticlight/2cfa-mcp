@@ -1,0 +1,24 @@
+# Compiled binaries
+build/
+bin/
+*.exe
+2cfa-mcp
+2cfa-mcp-linux-arm64
+2cfa-mcp-linux-amd64
+qnmcp
+qnmcp-linux-arm64
+qnmcp-linux-amd64
+
+# Logs
+*.log
+2cfa-mcp.log
+qnmcp.log
+
+# Local environment files
+.env
+.env.local
+
+# Temporary / workspace files
+workspace/
+.DS_Store
+Thumbs.db
