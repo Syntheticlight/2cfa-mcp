@@ -141,3 +141,63 @@ func TestProxyBufferingDisabledHeaders(t *testing.T) {
 		t.Errorf("expected Cache-Control: no-cache, no-transform, got '%s'", rec.Header().Get("Cache-Control"))
 	}
 }
+
+
+func TestCanonicalClientIdentityRejectsSpoofedProxyHeadersFromPublicPeer(t *testing.T) {
+	mw := NewMiddleware("test-token")
+	var gotIP, gotCountry string
+	handler := mw.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotIP = r.Header.Get(CanonicalClientIPHeader)
+		gotCountry = r.Header.Get(CanonicalClientCountryHeader)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/sse", nil)
+	req.RemoteAddr = "203.0.113.55:4567"
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("CF-Connecting-IP", "1.2.3.4")
+	req.Header.Set("X-Forwarded-For", "5.6.7.8")
+	req.Header.Set("CF-IPCountry", "ZZ")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected request to be authenticated, got %d", rec.Code)
+	}
+	if gotIP != "203.0.113.55" {
+		t.Fatalf("expected public peer IP to win over spoofed proxy headers, got %q", gotIP)
+	}
+	if gotCountry != "DIRECT" {
+		t.Fatalf("expected direct peer country marker, got %q", gotCountry)
+	}
+}
+
+func TestCanonicalClientIdentityTrustsLocalReverseProxy(t *testing.T) {
+	mw := NewMiddleware("test-token")
+	var gotIP, gotCountry string
+	handler := mw.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotIP = r.Header.Get(CanonicalClientIPHeader)
+		gotCountry = r.Header.Get(CanonicalClientCountryHeader)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/sse", nil)
+	req.RemoteAddr = "127.0.0.1:4567"
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("CF-Connecting-IP", "198.51.100.20")
+	req.Header.Set("CF-IPCountry", "US")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected request to be authenticated, got %d", rec.Code)
+	}
+	if gotIP != "198.51.100.20" {
+		t.Fatalf("expected trusted local proxy client IP, got %q", gotIP)
+	}
+	if gotCountry != "US" {
+		t.Fatalf("expected trusted proxy country, got %q", gotCountry)
+	}
+}
