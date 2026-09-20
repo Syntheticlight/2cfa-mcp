@@ -113,16 +113,6 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 
 	// MCP endpoints handler wrapper
 	mcpHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.Body != nil {
-			if r.ContentLength > MaxRequestBodyBytes {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusRequestEntityTooLarge)
-				_, _ = w.Write([]byte(`{"error":"request body too large"}`))
-				return
-			}
-			r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodyBytes)
-		}
-
 		clientIP, country := gate.ResolveClientIP(r)
 		sanitizedURI := auth.SanitizeURL(r.URL.RequestURI(), cfg.AuthToken)
 		log.Printf("[REQ] %s %s from %s [%s]", r.Method, sanitizedURI, clientIP, country)
@@ -164,9 +154,12 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	// Route all other requests through MCP handler
 	mux.Handle("/", mcpHandler)
 
-	// Wrap entire mux with Auth Middleware
+	// Wrap the entire application with authentication first, then a global
+	// request-body cap. Unauthorized callers are rejected without reading their
+	// bodies; authenticated MCP and /gate POSTs are all bounded.
 	authMW := auth.NewMiddleware(cfg.AuthToken)
-	authenticatedHandler := authMW.Authenticate(mux)
+	limitedHandler := limitRequestBody(mux)
+	authenticatedHandler := authMW.Authenticate(limitedHandler)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
@@ -183,6 +176,21 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		gateMgr:   gateMgr,
 		httpSrv:   srv,
 	}, nil
+}
+
+func limitRequestBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch) && r.Body != nil {
+			if r.ContentLength > MaxRequestBodyBytes {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				_, _ = w.Write([]byte(`{"error":"request body too large"}`))
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // HealthResponse represents the zero-leak health check output.
