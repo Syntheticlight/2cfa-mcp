@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Syntheticlight/2cfa-mcp/internal/auth"
 )
 
 // AuditEntry stores an individual execution audit record.
@@ -613,6 +615,14 @@ func (m *Manager) GetAudits() []AuditEntry {
 
 // ResolveClientIP parses real client IP and country from request headers.
 func ResolveClientIP(r *http.Request) (string, string) {
+	if canonicalIP := strings.TrimSpace(r.Header.Get(auth.CanonicalClientIPHeader)); canonicalIP != "" {
+		country := strings.TrimSpace(r.Header.Get(auth.CanonicalClientCountryHeader))
+		if country == "" {
+			country = "LOCAL"
+		}
+		return canonicalIP, country
+	}
+
 	country := r.Header.Get("CF-IPCountry")
 	if country == "" {
 		country = "LOCAL"
