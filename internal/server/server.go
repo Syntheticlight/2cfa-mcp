@@ -59,7 +59,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	})
 
 	// Register tools with gate protection and audit tracking
-	tools.RegisterGateTools(mcpSrv, gateMgr)
+	tools.RegisterGateTools(mcpSrv, gateMgr, cfg.WorkspacePath)
 	tools.RegisterCommandTool(mcpSrv, cfg.WorkspacePath, cfg.ExecTimeout, gateMgr)
 	tools.RegisterFileTools(mcpSrv, cfg.WorkspacePath, gateMgr)
 	tools.RegisterSysInfoTool(mcpSrv, gateMgr)

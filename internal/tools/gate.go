@@ -4,16 +4,18 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/skip2/go-qrcode"
 	"github.com/Syntheticlight/2cfa-mcp/internal/gate"
 )
 
 // RegisterGateTools registers setup_2fa, unlock_gate, and lock_gate tools to MCP server.
-func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
+func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager, workspaceRoot string) {
 	// 1. setup_2fa: Standard 2FA setup and confirmation flow
 	setupTool := mcp.NewTool("setup_2fa",
 		mcp.WithDescription("Standard 2FA setup and confirmation flow. Step 1: Call with enable=true (without code) to generate a Base32 secret & OTP URI. Step 2: Call with enable=true and code='<6-digit>' to verify, confirm, and permanently activate 2FA with automatic session unlocking. Call with enable=false to turn off 2FA."),
@@ -94,18 +96,50 @@ Dynamic Lease Token: %s (Auto-unlocked for this session)
 			nodeName = "edge"
 		}
 		otpauthURI := fmt.Sprintf("otpauth://totp/2cfa-mcp:%s?secret=%s&issuer=2cfa-mcp", nodeName, pendingSecret)
+
+		var qrBlock string
+		var savedPath string
+		if qr, qrErr := qrcode.New(otpauthURI, qrcode.Medium); qrErr == nil {
+			qrBlock = qr.ToSmallString(false)
+			if pngBytes, pErr := qr.PNG(256); pErr == nil {
+				if workspaceRoot != "" {
+					p := filepath.Join(workspaceRoot, "2fa-totp-qr.png")
+					if wErr := os.WriteFile(p, pngBytes, 0644); wErr == nil {
+						savedPath = p
+					}
+				}
+				if homeDir, hErr := os.UserHomeDir(); hErr == nil {
+					deskDir := filepath.Join(homeDir, "Desktop")
+					if fi, sErr := os.Stat(deskDir); sErr == nil && fi.IsDir() {
+						deskPath := filepath.Join(deskDir, fmt.Sprintf("2cfa-mcp-%s-totp-qr.png", nodeName))
+						if dErr := os.WriteFile(deskPath, pngBytes, 0644); dErr == nil {
+							savedPath = deskPath
+						}
+					}
+				}
+			}
+		}
+
+		qrSection := ""
+		if qrBlock != "" {
+			qrSection = fmt.Sprintf("\n=== Scan QR Code with Authenticator ===\n```\n%s\n```\n", qrBlock)
+		}
+		if savedPath != "" {
+			qrSection += fmt.Sprintf("QR Image File: %s\n", savedPath)
+		}
+
 		msg := fmt.Sprintf(`[2FA SETUP - PENDING VERIFICATION]
 A 2FA secret has been generated. 2FA is NOT active yet until verified.
 
 === 2FA Credentials ===
 Base32 Secret: %s
 OTP Auth URI:  %s
-
+%s
 === CRITICAL NEXT STEP ===
-1. Add this key to your authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, or iOS Passwords), or tap the OTP Auth URI.
+1. Scan the QR code, view the saved QR image, or add the Base32 Secret to your authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, or iOS Passwords).
 2. Ask the user for the 6-digit dynamic code currently shown in their app.
 3. Call setup_2fa(enable=true, code="<6-digit-code>") to confirm and permanently activate 2FA.`,
-			pendingSecret, otpauthURI)
+			pendingSecret, otpauthURI, qrSection)
 
 		return mcp.NewToolResultText(msg), nil
 	})

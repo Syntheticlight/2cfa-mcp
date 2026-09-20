@@ -21,7 +21,7 @@ func TestFullConversational2FAWorkflow(t *testing.T) {
 	})
 
 	mcpSrv := server.NewMCPServer("test", "1.0.0")
-	RegisterGateTools(mcpSrv, gateMgr)
+	RegisterGateTools(mcpSrv, gateMgr, tmpDir)
 	RegisterCommandTool(mcpSrv, tmpDir, 5*time.Second, gateMgr)
 	RegisterFileTools(mcpSrv, tmpDir, gateMgr)
 	RegisterSysInfoTool(mcpSrv, gateMgr)
@@ -184,9 +184,10 @@ func TestResolveShell(t *testing.T) {
 }
 
 func TestSetup2FAValidation(t *testing.T) {
+	tmpDir := t.TempDir()
 	gateMgr := gate.NewManager(gate.Config{Enabled: false})
 	mcpSrv := server.NewMCPServer("test", "1.0.0")
-	RegisterGateTools(mcpSrv, gateMgr)
+	RegisterGateTools(mcpSrv, gateMgr, tmpDir)
 
 	setupTool := mcpSrv.GetTool("setup_2fa")
 
@@ -198,6 +199,10 @@ func TestSetup2FAValidation(t *testing.T) {
 	res, err := setupTool.Handler(context.Background(), reqNoSecret)
 	if err != nil || res.IsError {
 		t.Errorf("expected success with auto-generated secret, got: %+v", res)
+	}
+	text := res.Content[0].(mcp.TextContent).Text
+	if !strings.Contains(text, "Scan QR Code") {
+		t.Errorf("expected response to contain QR code block, got: %s", text)
 	}
 
 	// 2. Step 2: Confirm with wrong code -> Must fail and not activate 2FA
@@ -224,12 +229,13 @@ func TestSetup2FAValidation(t *testing.T) {
 }
 
 func TestSetup2FAWhenAlreadyEnabled(t *testing.T) {
+	tmpDir := t.TempDir()
 	gateMgr := gate.NewManager(gate.Config{
 		Enabled:    true,
 		TOTPSecret: "JBSWY3DPEHPK3PXP",
 	})
 	mcpSrv := server.NewMCPServer("test", "1.0.0")
-	RegisterGateTools(mcpSrv, gateMgr)
+	RegisterGateTools(mcpSrv, gateMgr, tmpDir)
 
 	setupTool := mcpSrv.GetTool("setup_2fa")
 
@@ -251,7 +257,7 @@ func TestSetup2FAWhenAlreadyEnabled(t *testing.T) {
 	// Calling unlock_gate when 2FA is disabled returns informative direct mode message
 	gateMgrDisable := gate.NewManager(gate.Config{Enabled: false})
 	mcpSrv2 := server.NewMCPServer("test2", "1.0.0")
-	RegisterGateTools(mcpSrv2, gateMgrDisable)
+	RegisterGateTools(mcpSrv2, gateMgrDisable, tmpDir)
 	unlockTool2 := mcpSrv2.GetTool("unlock_gate")
 
 	unlockReq := mcp.CallToolRequest{}
