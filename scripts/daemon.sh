@@ -172,9 +172,31 @@ case "$1" in
 
         TARGET_ASSET="2cfa-mcp-${ARCH}"
         DOWNLOAD_URL="https://github.com/Syntheticlight/2cfa-mcp/releases/latest/download/${TARGET_ASSET}"
+        LATEST_API="https://api.github.com/repos/Syntheticlight/2cfa-mcp/releases/latest"
         TMP_FILE="${ROOT_DIR}/build/${TARGET_ASSET}.tmp"
 
         echo "[INFO] Platform/Architecture: ${ARCH}"
+
+        # Newer binaries expose -version. Compare against the latest release tag
+        # before downloading so a source-built/security-patched binary cannot be
+        # accidentally downgraded to an older GitHub Release.
+        CURRENT_VERSION=$("${BINARY}" -version 2>/dev/null | tail -n 1 | tr -d '\r' || true)
+        LATEST_VERSION=$(curl -sSL -f "${LATEST_API}" 2>/dev/null | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 || true)
+
+        if [ -n "${CURRENT_VERSION}" ] && [ -n "${LATEST_VERSION}" ]; then
+            if [ "${CURRENT_VERSION}" = "${LATEST_VERSION}" ]; then
+                echo "[INFO] Already running latest release ${CURRENT_VERSION}; nothing to update."
+                exit 0
+            fi
+
+            LOWEST_VERSION=$(printf '%s\n%s\n' "${LATEST_VERSION}" "${CURRENT_VERSION}" | sort -V | head -n 1)
+            if [ "${LOWEST_VERSION}" = "${LATEST_VERSION}" ]; then
+                echo "[ERROR] Refusing downgrade: installed ${CURRENT_VERSION}, latest published release is older (${LATEST_VERSION})."
+                echo "[ERROR] Publish a newer release before using the updater."
+                exit 1
+            fi
+        fi
+
         echo "[INFO] Downloading latest release from GitHub: ${DOWNLOAD_URL}"
 
         mkdir -p "${ROOT_DIR}/build"
@@ -192,8 +214,21 @@ case "$1" in
         fi
 
         chmod +x "${TMP_FILE}"
+
+        # Defense in depth: if both binaries expose versions, verify the
+        # downloaded asset itself is not older than the installed binary.
+        DOWNLOADED_VERSION=$("${TMP_FILE}" -version 2>/dev/null | tail -n 1 | tr -d '\r' || true)
+        if [ -n "${CURRENT_VERSION}" ] && [ -n "${DOWNLOADED_VERSION}" ]; then
+            LOWEST_VERSION=$(printf '%s\n%s\n' "${DOWNLOADED_VERSION}" "${CURRENT_VERSION}" | sort -V | head -n 1)
+            if [ "${DOWNLOADED_VERSION}" != "${CURRENT_VERSION}" ] && [ "${LOWEST_VERSION}" = "${DOWNLOADED_VERSION}" ]; then
+                echo "[ERROR] Downloaded asset ${DOWNLOADED_VERSION} is older than installed ${CURRENT_VERSION}; aborting."
+                rm -f "${TMP_FILE}"
+                exit 1
+            fi
+        fi
+
         mv -f "${TMP_FILE}" "${BINARY}"
-        echo "[SUCCESS] Updated ${BINARY} successfully."
+        echo "[SUCCESS] Updated ${BINARY} successfully${DOWNLOADED_VERSION:+ to ${DOWNLOADED_VERSION}}."
 
         if pgrep -f "2cfa-mcp" >/dev/null || [ -f "${PID_FILE}" ]; then
             echo "[INFO] Restarting 2cfa-mcp daemon..."
