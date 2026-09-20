@@ -150,7 +150,9 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 			ToolName:   "execute_command",
 			DurationMs: duration,
 			Status:     "SUCCESS",
-			Message:    fmt.Sprintf("Command: %s", truncateStr(command, 50)),
+			// Avoid copying command arguments into the audit dashboard: commands
+			// often contain credentials, URLs or tokens. Tool/IP/timing are enough.
+			Message:    "Command executed",
 		})
 
 		return mcp.NewToolResultText(output), nil
