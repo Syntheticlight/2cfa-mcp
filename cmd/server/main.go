@@ -42,8 +42,14 @@ func main() {
 	// 2FA Gate flags (Defaults to false for zero-friction direct token connect)
 	enable2FAFlag := flag.Bool("2fa", getEnvBool("ENABLE_2FA_GATE", false), "Enable 2FA Gate physical protection (false by default)")
 	totpSecretFlag := flag.String("totp-secret", getEnvStr("TOTP_SECRET", ""), "Base32 TOTP secret for Google Authenticator")
+	versionFlag := flag.Bool("version", false, "Print version and exit")
 
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Println(updater.CurrentVersion)
+		return
+	}
 
 	if *tokenFlag == "" {
 		log.Fatalf("[FATAL] AUTH_TOKEN must be set via env or -token flag for security!")
@@ -85,7 +91,7 @@ func main() {
 	fmt.Printf(" Workspace Path:  %s\n", cfg.WorkspacePath)
 	fmt.Printf(" Health Endpoint: http://localhost:%d/health\n", cfg.Port)
 	if cfg.Enable2FAGate {
-		fmt.Println(" 2FA Protection:  ENABLED (Unlock via in-chat 'unlock_gate' or /gate)")
+		fmt.Println(" 2FA Protection:  ENABLED (Unlock via in-chat 'unlock_gate'; monitor/lock via /gate)")
 	} else {
 		fmt.Println(" 2FA Protection:  DISABLED (Default Token-only Direct Connection)")
 	}
