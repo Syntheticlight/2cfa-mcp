@@ -73,9 +73,10 @@ start_supervisor_loop() {
         echo "[INFO] Starting 2cfa-mcp server instance at $(date)..." >> "${LOG_FILE}"
 
         # Do NOT pass -2fa or -totp-secret flags: binary natively loads .env as single source of truth!
+        # AUTH_TOKEN stays in the environment; never place secrets in argv where
+        # they can be exposed through ps or /proc/<pid>/cmdline.
         "${BINARY}" \
             -port="${PORT:-2232}" \
-            -token="${AUTH_TOKEN}" \
             -workspace="${WORKSPACE_PATH:-${ROOT_DIR}/workspace}" \
             -timeout="${EXEC_TIMEOUT:-120}" >> "${LOG_FILE}" 2>&1 || true
 
@@ -191,9 +192,41 @@ case "$1" in
             exit 1
         fi
 
+        CHECKSUM_URL="https://github.com/Syntheticlight/2cfa-mcp/releases/latest/download/SHA256SUMS"
+        CHECKSUM_FILE="${ROOT_DIR}/build/SHA256SUMS.tmp"
+        if ! curl -sSL -f -o "${CHECKSUM_FILE}" "${CHECKSUM_URL}"; then
+            echo "[ERROR] Release checksum manifest is missing. Refusing unverified update."
+            rm -f "${TMP_FILE}" "${CHECKSUM_FILE}"
+            exit 1
+        fi
+
+        EXPECTED_SHA=$(awk -v asset="${TARGET_ASSET}" '$2 == asset || $2 == ("*" asset) {print $1; exit}' "${CHECKSUM_FILE}")
+        if [ -z "${EXPECTED_SHA}" ]; then
+            echo "[ERROR] No checksum found for ${TARGET_ASSET}. Aborting."
+            rm -f "${TMP_FILE}" "${CHECKSUM_FILE}"
+            exit 1
+        fi
+
+        if command -v sha256sum >/dev/null 2>&1; then
+            ACTUAL_SHA=$(sha256sum "${TMP_FILE}" | awk '{print $1}')
+        elif command -v shasum >/dev/null 2>&1; then
+            ACTUAL_SHA=$(shasum -a 256 "${TMP_FILE}" | awk '{print $1}')
+        else
+            echo "[ERROR] No SHA-256 utility found (sha256sum/shasum). Refusing unverified update."
+            rm -f "${TMP_FILE}" "${CHECKSUM_FILE}"
+            exit 1
+        fi
+
+        if [ "${ACTUAL_SHA}" != "${EXPECTED_SHA}" ]; then
+            echo "[ERROR] SHA-256 mismatch for ${TARGET_ASSET}. Aborting update."
+            rm -f "${TMP_FILE}" "${CHECKSUM_FILE}"
+            exit 1
+        fi
+
+        rm -f "${CHECKSUM_FILE}"
         chmod +x "${TMP_FILE}"
         mv -f "${TMP_FILE}" "${BINARY}"
-        echo "[SUCCESS] Updated ${BINARY} successfully."
+        echo "[SUCCESS] Updated ${BINARY} successfully (SHA-256 verified)."
 
         if pgrep -f "2cfa-mcp" >/dev/null || [ -f "${PID_FILE}" ]; then
             echo "[INFO] Restarting 2cfa-mcp daemon..."
