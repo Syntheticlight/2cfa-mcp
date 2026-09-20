@@ -28,7 +28,7 @@
 
 ## 为什么选择 2cfa-mcp？
 
-1. **告别 Node.js 内存笨重**：传统基于 Node.js 的 MCP 服务动辄消耗 100MB~150MB V8 内存，手机后台频繁被杀。本项目采用 Go 1.26.1+ 编写，运行时常驻内存仅 **10MB ~ 15MB RAM**，单文件静态二进制仅 **~8MB**。
+1. **告别 Node.js 内存笨重**：传统基于 Node.js 的 MCP 服务动辄消耗 100MB~150MB V8 内存，手机后台频繁被杀。本项目采用 Go 1.26.8+ 编写，运行时常驻内存仅 **10MB ~ 15MB RAM**，单文件静态二进制仅 **~8MB**。
 2. **彻底解决未鉴权泄密隐患**：重构了社区项目中未鉴权 `/health` 导致 Token 泄露的致命隐患，实现全链路零泄露设计（Zero-Leakage）与基于 `filepath.Clean` 的强制路径防穿越保护。
 3. **首创对话内隐式租约机制**：在对话中直接报一次 6 位 TOTP 动态码完成解锁，签发隐式凭证（`lease_token`）。AI 在后台数据流中静默携带，聊天界面干干净净，无惧底层网络重连与掉线！
 
@@ -120,7 +120,7 @@ TOTP_SECRET=
 ### 3. 启动守护进程与 Cloudflare 隧道
 > ⚠️ **升级说明**：如果你是从 `v1.0.4` 或更早版本升级，建议先执行 `git pull`（或重新克隆仓库）再运行 `./scripts/daemon.sh update`。旧版 `daemon.sh` 只会替换二进制，不会自动更新自身，因此拿不到 v1.0.5+ 新增的 argv 脱敏、日志轮转和 SHA-256 校验逻辑。
 
-> 🛡️ **v1.0.7 安全加固**：SSE 长连接不再受全局写超时影响；显式系统环境变量优先于 `.env`；CI/Release 会执行 `govulncheck ./...`，并将 `golang.org/x/text` 升级到已修复 GO-2026-5970 的版本。
+> 🛡️ **v1.0.7 安全加固**：SSE 长连接不再受全局写超时影响；显式系统环境变量优先于 `.env`；CI/Release 会执行 `govulncheck ./...`；最低 Go 工具链提升到包含标准库安全修复的 1.26.8，并将 `golang.org/x/text` 升级到已修复 GO-2026-5970 的版本。
 
 项目自带高可用 Supervisor 脚本，支持进程自愈重启与 Termux 唤醒锁防休眠：
 ```bash
@@ -281,7 +281,7 @@ https://<你的穿透域名>/gate?token=<你的AUTH_TOKEN>
 <a name="english-documentation"></a>
 # English Documentation
 
-`2cfa-mcp` is an ultra-lightweight, high-security remote **Model Context Protocol (MCP)** server implemented in **Go 1.26.1+**. Designed specifically for **Android Termux (24/7 background alive)**, **low-spec Linux VPS (512MB RAM)**, and **Raspberry Pi**, it connects ChatGPT Web and remote AI agents to edge devices with minimal footprint (~12MB RAM) and zero-friction security.
+`2cfa-mcp` is an ultra-lightweight, high-security remote **Model Context Protocol (MCP)** server implemented in **Go 1.26.8+**. Designed specifically for **Android Termux (24/7 background alive)**, **low-spec Linux VPS (512MB RAM)**, and **Raspberry Pi**, it connects ChatGPT Web and remote AI agents to edge devices with minimal footprint (~12MB RAM) and zero-friction security.
 
 ## Core Architecture: 3 Simple Modes (Zero-Friction Mental Model)
 
