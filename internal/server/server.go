@@ -49,7 +49,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	}
 
 	mcpSrv := server.NewMCPServer(
-		"2cfa-mcp", "1.0.6",
+		"2cfa-mcp", "1.0.7",
 		server.WithDescription("High-security, low-memory remote MCP Server for edge devices"),
 	)
 
@@ -162,10 +162,13 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	authenticatedHandler := authMW.Authenticate(limitedHandler)
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Port),
-		Handler:      authenticatedHandler,
-		ReadTimeout:  300 * time.Second,
-		WriteTimeout: 300 * time.Second,
+		Addr:              fmt.Sprintf(":%d", cfg.Port),
+		Handler:           authenticatedHandler,
+		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       300 * time.Second,
+		// SSE responses are intentionally long-lived. A global WriteTimeout
+		// would terminate healthy event streams after the timeout interval.
+		WriteTimeout: 0,
 		IdleTimeout:  600 * time.Second,
 	}
 
