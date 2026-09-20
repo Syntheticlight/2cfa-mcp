@@ -10,14 +10,15 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/Syntheticlight/2cfa-mcp/internal/gate"
+	"github.com/Syntheticlight/2cfa-mcp/internal/updater"
 )
 
 var startTime = time.Now()
 
-// RegisterSysInfoTool registers system_status and system_info tools to MCP server.
-// System info is harmless read-only telemetry and NEVER requires 2FA or lease_token.
+// RegisterSysInfoTool registers system_status, system_info, and check_update tools to MCP server.
+// System info and update checks are harmless read-only telemetry and NEVER require 2FA or lease_token.
 func RegisterSysInfoTool(s *server.MCPServer, gateMgr *gate.Manager) {
-	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	statusHandler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		start := time.Now()
 		ip, country := resolveHeaderIP(request.Header)
 
@@ -26,8 +27,18 @@ func RegisterSysInfoTool(s *server.MCPServer, gateMgr *gate.Manager) {
 
 		uptime := time.Since(startTime).Truncate(time.Second)
 		gateState := gateMgr.GetState()
+		upInfo := updater.GetInfo()
 
 		var sb strings.Builder
+		sb.WriteString("=== Version & Update Information ===\n")
+		sb.WriteString(fmt.Sprintf("Server Version:    %s\n", updater.CurrentVersion))
+		if upInfo.HasUpdate {
+			sb.WriteString(fmt.Sprintf("Update Available:  YES (🚀 %s)\n", upInfo.LatestVersion))
+			sb.WriteString(fmt.Sprintf("Release URL:       %s\n\n", upInfo.ReleaseURL))
+		} else {
+			sb.WriteString("Update Available:  Up to date (✅)\n\n")
+		}
+
 		sb.WriteString("=== System & Runtime Information ===\n")
 		sb.WriteString(fmt.Sprintf("OS / Architecture: %s / %s\n", runtime.GOOS, runtime.GOARCH))
 		sb.WriteString(fmt.Sprintf("Logical CPUs:      %d\n", runtime.NumCPU()))
@@ -64,12 +75,36 @@ func RegisterSysInfoTool(s *server.MCPServer, gateMgr *gate.Manager) {
 	}
 
 	toolStatus := mcp.NewTool("system_status",
-		mcp.WithDescription("Get system hardware load (CPU, RAM) and 2FA gate status. Harmless read-only tool."),
+		mcp.WithDescription("Get system hardware load (CPU, RAM), 2FA gate status, and version update information. Harmless read-only tool."),
 	)
-	s.AddTool(toolStatus, handler)
+	s.AddTool(toolStatus, statusHandler)
 
 	toolInfo := mcp.NewTool("system_info",
 		mcp.WithDescription("Alias for system_status"),
 	)
-	s.AddTool(toolInfo, handler)
+	s.AddTool(toolInfo, statusHandler)
+
+	// check_update tool: allows on-demand update checks directly via chat
+	checkUpdateTool := mcp.NewTool("check_update",
+		mcp.WithDescription("Check GitHub for the latest 2cfa-mcp release and compare with current version. Harmless read-only tool."),
+		mcp.WithBoolean("force", mcp.Description("Optional. Set true to bypass cache and check GitHub API immediately")),
+	)
+	s.AddTool(checkUpdateTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		force := request.GetBool("force", false)
+		info := updater.Check(ctx, force)
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Current Version: %s\n", info.CurrentVersion))
+		sb.WriteString(fmt.Sprintf("Latest Release:  %s\n", info.LatestVersion))
+		if info.HasUpdate {
+			sb.WriteString(fmt.Sprintf("Status: 🚀 New version available!\nRelease URL: %s\n", info.ReleaseURL))
+			sb.WriteString("To update on Linux/Termux, run: ./scripts/daemon.sh update\n")
+		} else {
+			sb.WriteString("Status: ✅ You are running the latest version.\n")
+		}
+		if info.CheckError != "" {
+			sb.WriteString(fmt.Sprintf("Notice: %s\n", info.CheckError))
+		}
+		return mcp.NewToolResultText(sb.String()), nil
+	})
 }

@@ -109,8 +109,58 @@ case "$1" in
         echo "[INFO] Launching Cloudflare Quick Tunnel for port ${PORT}..."
         cloudflared tunnel --url "http://localhost:${PORT}"
         ;;
+    update)
+        echo "=========================================================================="
+        echo " 2cfa-mcp Safe Open-Source Updater"
+        echo "=========================================================================="
+        ARCH=""
+        if [ -n "${PREFIX}" ] || [ -d "/data/data/com.termux/files/usr/bin" ]; then
+            ARCH="android-arm64"
+        else
+            UNAME_M=$(uname -m)
+            case "${UNAME_M}" in
+                x86_64|amd64) ARCH="linux-amd64" ;;
+                aarch64|arm64) ARCH="linux-arm64" ;;
+                *) echo "[ERROR] Unsupported architecture: ${UNAME_M}"; exit 1 ;;
+            esac
+        fi
+
+        TARGET_ASSET="2cfa-mcp-${ARCH}"
+        DOWNLOAD_URL="https://github.com/Syntheticlight/2cfa-mcp/releases/latest/download/${TARGET_ASSET}"
+        TMP_FILE="${ROOT_DIR}/build/${TARGET_ASSET}.tmp"
+
+        echo "[INFO] Platform/Architecture: ${ARCH}"
+        echo "[INFO] Downloading latest release from GitHub: ${DOWNLOAD_URL}"
+
+        mkdir -p "${ROOT_DIR}/build"
+        if ! curl -sSL -f -o "${TMP_FILE}" "${DOWNLOAD_URL}"; then
+            echo "[ERROR] Download failed. Please check network connectivity or GitHub release availability."
+            rm -f "${TMP_FILE}"
+            exit 1
+        fi
+
+        FILE_SIZE=$(wc -c < "${TMP_FILE}" | tr -d " ")
+        if [ "${FILE_SIZE}" -lt 1000000 ]; then
+            echo "[ERROR] Downloaded file too small (${FILE_SIZE} bytes). Aborting."
+            rm -f "${TMP_FILE}"
+            exit 1
+        fi
+
+        chmod +x "${TMP_FILE}"
+        mv -f "${TMP_FILE}" "${BINARY}"
+        echo "[SUCCESS] Updated ${BINARY} successfully."
+
+        if pgrep -f "2cfa-mcp" >/dev/null; then
+            echo "[INFO] Restarting 2cfa-mcp daemon..."
+            $0 stop
+            sleep 1
+            $0 start
+        else
+            echo "[INFO] Update complete. Run '$0 start' when ready."
+        fi
+        ;;
     *)
-        echo "Usage: $0 {start|stop|status|cloudflared}"
+        echo "Usage: $0 {start|stop|status|update|cloudflared}"
         exit 1
         ;;
 esac

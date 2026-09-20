@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Syntheticlight/2cfa-mcp/internal/server"
+	"github.com/Syntheticlight/2cfa-mcp/internal/updater"
 )
 
 func init() {
@@ -67,9 +68,13 @@ func main() {
 		}
 	}()
 
+	// Non-blocking auto-check for updates from GitHub Releases
+	updater.StartBackgroundChecker()
+
 	fmt.Println("==========================================================================")
 	fmt.Println("                  2cfa-mcp - Go Remote MCP Server                           ")
 	fmt.Println("==========================================================================")
+	fmt.Printf(" Version:         %s\n", updater.CurrentVersion)
 	fmt.Printf(" Listening Port:  :%d\n", cfg.Port)
 	fmt.Printf(" Workspace Path:  %s\n", cfg.WorkspacePath)
 	fmt.Printf(" Health Endpoint: http://localhost:%d/health\n", cfg.Port)

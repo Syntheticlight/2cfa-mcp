@@ -59,7 +59,8 @@
 | `read_file` | 读取工作区内指定文件（强制防路径穿越保护） | `path` (文件相对路径) |
 | `write_file` | 写入或覆盖工作区文件（自动递归创建父级目录） | `path` (文件相对路径), `content` (写入内容) |
 | `list_dir` | 结构化列出指定目录下的文件与文件夹 | `path` (可选目录路径，留空为根目录) |
-| `system_status` | 实时查看 CPU 核心、内存占用与服务运行时间 | 无需任何参数 |
+| `system_status` | 实时查看 CPU 核心、内存占用、运行时间及版本更新状态 | 无需任何参数 |
+| `check_update` | 检查 GitHub 是否有新版本发布与更新日志 | `force` (可选是否强制跳过缓存) |
 
 ### 2. 可选 2FA 安全门禁工具（仅当你主动开启 2FA 时才需要）
 
@@ -119,6 +120,12 @@ chmod +x scripts/daemon.sh
 
 # 启动后台常驻服务
 ./scripts/daemon.sh start
+
+# 查看状态
+./scripts/daemon.sh status
+
+# 一键平滑安全升级至最新版（透明开源，绝非黑盒静默代码）
+./scripts/daemon.sh update
 
 # 一键启动 Cloudflare 免费公网隧道
 ./scripts/daemon.sh cloudflared

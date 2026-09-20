@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/Syntheticlight/2cfa-mcp/internal/updater"
 )
 
 // Handler handles /gate dashboard and API requests.
@@ -60,11 +62,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	state := h.manager.GetState()
 	audits := h.manager.GetAudits()
+	upInfo := updater.GetInfo()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"state":  state,
 		"audits": audits,
+		"update": upInfo,
 	})
 }
 
@@ -464,14 +468,22 @@ const dashboardHTML = `<!DOCTYPE html>
         const res = await fetch('/gate/api/status?token=' + encodeURIComponent(token));
         if (!res.ok) return;
         const data = await res.json();
-        renderState(data.state);
+        renderState(data.state, data.update);
         renderAudits(data.audits);
       } catch (e) {
         console.error("fetch status error:", e);
       }
     }
 
-    function renderState(state) {
+    function renderState(state, update) {
+      if (update && update.has_update) {
+        const b = document.getElementById('updateBanner');
+        if (b) {
+          b.style.display = 'block';
+          document.getElementById('updateText').innerText = 'New ' + update.latest_version + ' available!';
+          document.getElementById('updateLink').href = update.release_url;
+        }
+      }
       const badge = document.getElementById('statusBadge');
       const gateBox = document.getElementById('idleCountdown');
       const leasesBox = document.getElementById('maxCountdown');
