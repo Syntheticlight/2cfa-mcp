@@ -16,7 +16,7 @@ import (
 
 const (
 	DefaultExecTimeout = 120 * time.Second
-	MaxOutputBytes     = 1024 * 1024 // 1 MB limit to protect memory on low-resource devices
+	MaxOutputBytes     = 4 * 1024 * 1024 // 4 MB limit (protects LLM context window & RAM)
 )
 
 // RegisterCommandTool registers execute_command tool to MCP server.
@@ -29,7 +29,7 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 		mcp.WithDescription("Execute shell command within workspace with strict timeout and output limits"),
 		mcp.WithString("command", mcp.Required(), mcp.Description("The shell command to execute")),
 		mcp.WithString("work_dir", mcp.Description("Optional sub-directory relative to workspace root")),
-		mcp.WithNumber("timeout_seconds", mcp.Description("Optional execution timeout in seconds")),
+		mcp.WithNumber("timeout_seconds", mcp.Description("Optional execution timeout in seconds (e.g. 600 or 1800 for long tasks/downloads). Set -1 for unlimited")),
 		mcp.WithString("lease_token", mcp.Description("Optional. Leave empty in normal use. Only pass if 2FA gate was explicitly turned on")),
 	)
 
@@ -74,12 +74,21 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 		}
 
 		timeout := defaultTimeout
-		if tSec := request.GetFloat("timeout_seconds", 0); tSec > 0 {
+		tSec := request.GetFloat("timeout_seconds", 0)
+		if tSec > 0 {
 			timeout = time.Duration(tSec) * time.Second
+		} else if tSec == -1 {
+			timeout = 0 // unlimited
 		}
 
-		execCtx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
+		var execCtx context.Context
+		var cancel context.CancelFunc
+		if timeout > 0 {
+			execCtx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
+		} else {
+			execCtx = ctx
+		}
 
 		var cmd *exec.Cmd
 		if runtime.GOOS == "windows" {
@@ -100,10 +109,10 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 		stderrStr := stderrBuf.String()
 
 		if len(stdoutStr) > MaxOutputBytes {
-			stdoutStr = stdoutStr[:MaxOutputBytes] + "\n... [stdout truncated due to 1MB limit]"
+			stdoutStr = stdoutStr[:MaxOutputBytes] + "\n... [stdout truncated due to 4MB limit. Tip: redirect large output to file with > file.log]"
 		}
 		if len(stderrStr) > MaxOutputBytes {
-			stderrStr = stderrStr[:MaxOutputBytes] + "\n... [stderr truncated due to 1MB limit]"
+			stderrStr = stderrStr[:MaxOutputBytes] + "\n... [stderr truncated due to 4MB limit]"
 		}
 
 		output := fmt.Sprintf("=== STDOUT ===\n%s\n=== STDERR ===\n%s", stdoutStr, stderrStr)

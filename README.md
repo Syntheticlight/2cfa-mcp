@@ -55,7 +55,7 @@
 
 | 工具名称 | 主要功能 | 常用参数 |
 | :--- | :--- | :--- |
-| `execute_command` | 执行 Shell 命令（带 120s 超时与 1MB 防爆内存截断） | `command` (命令), `work_dir` (可选目录) |
+| `execute_command` | 执行 Shell 命令（支持自定义长耗时任务与内存防爆保护） | `command` (命令), `work_dir` (可选目录), `timeout_seconds` (可选超时秒数) |
 | `read_file` | 读取工作区内指定文件（强制防路径穿越保护） | `path` (文件相对路径) |
 | `write_file` | 写入或覆盖工作区文件（自动递归创建父级目录） | `path` (文件相对路径), `content` (写入内容) |
 | `list_dir` | 结构化列出指定目录下的文件与文件夹 | `path` (可选目录路径，留空为根目录) |
