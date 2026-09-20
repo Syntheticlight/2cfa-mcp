@@ -17,7 +17,7 @@ import (
 
 func main() {
 	// Parse CLI flags and environment variables
-	portFlag := flag.Int("port", getEnvInt("PORT", 8080), "Server listening port")
+	portFlag := flag.Int("port", getEnvInt("PORT", 2232), "Server listening port")
 	tokenFlag := flag.String("token", os.Getenv("AUTH_TOKEN"), "Secret authentication token")
 	workspaceFlag := flag.String("workspace", getEnvStr("WORKSPACE_PATH", "."), "Allowed workspace directory")
 	timeoutFlag := flag.Int("timeout", getEnvInt("EXEC_TIMEOUT", 120), "Default execution timeout in seconds")

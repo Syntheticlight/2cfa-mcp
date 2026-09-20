@@ -85,7 +85,7 @@ vim .env  # 或使用 nano/文本编辑器
 ```
 在 `.env` 中填入你的专有安全密钥：
 ```ini
-PORT=8080
+PORT=2232
 AUTH_TOKEN=your-high-entropy-secret-token-here
 WORKSPACE_PATH=./workspace
 EXEC_TIMEOUT=120

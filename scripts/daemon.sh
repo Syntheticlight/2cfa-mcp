@@ -16,7 +16,7 @@ if [ -f "${ROOT_DIR}/.env" ]; then
     export $(grep -v '^#' "${ROOT_DIR}/.env" | xargs)
 fi
 
-PORT="${PORT:-8080}"
+PORT="${PORT:-2232}"
 AUTH_TOKEN="${AUTH_TOKEN:-}"
 WORKSPACE_PATH="${WORKSPACE_PATH:-${ROOT_DIR}/workspace}"
 EXEC_TIMEOUT="${EXEC_TIMEOUT:-120}"

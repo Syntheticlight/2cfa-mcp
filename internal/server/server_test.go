@@ -12,7 +12,7 @@ import (
 func TestHealthCheckZeroLeakage(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := ServerConfig{
-		Port:          8080,
+		Port:          2232,
 		AuthToken:     "secret-token-xyz-999",
 		WorkspacePath: tmpDir,
 		ExecTimeout:   120 * time.Second,
@@ -54,7 +54,7 @@ func TestHealthCheckZeroLeakage(t *testing.T) {
 func TestGateDashboardAccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := ServerConfig{
-		Port:          8080,
+		Port:          2232,
 		AuthToken:     "gate-token-12345",
 		WorkspacePath: tmpDir,
 		ExecTimeout:   120 * time.Second,
