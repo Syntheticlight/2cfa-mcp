@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const MaxRequestBodyBytes int64 = 16 * 1024 * 1024
+
 // Middleware holds authentication settings.
 type Middleware struct {
 	token string
@@ -37,6 +39,12 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 		w.Header().Set("X-Accel-Buffering", "no")
 		w.Header().Set("Cache-Control", "no-cache, no-transform")
 
+		// Bound request bodies before any transport handler reads them. This prevents
+		// Streamable HTTP / SSE message requests from allocating unbounded memory.
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodyBytes)
+		}
+
 		// Allow CORS preflight OPTIONS requests without requiring authentication
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Max-Age", "86400")
@@ -44,8 +52,11 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 			return
 		}
 
-		// Public endpoints or gate handler bypass authentication
-		if r.URL.Path == "/health" || r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/gate") {
+		// Public health endpoints and the exact /gate subtree use their own policy.
+		// Do not use a broad "/gate" prefix here: paths such as /gateevil would
+		// otherwise bypass this middleware and fall through to the MCP handler.
+		if r.URL.Path == "/health" || r.URL.Path == "/healthz" ||
+			r.URL.Path == "/gate" || strings.HasPrefix(r.URL.Path, "/gate/") {
 			next.ServeHTTP(w, r)
 			return
 		}
