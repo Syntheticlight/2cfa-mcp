@@ -404,8 +404,6 @@ const dashboardHTML = `<!DOCTYPE html>
       </div>
 
       <div class="actions-grid">
-        <input type="text" id="totpCode" class="input-code" placeholder="6-digit TOTP Code" maxlength="6" autocomplete="off" />
-        <button class="btn-primary" onclick="unlockGate()">Unlock with TOTP</button>
         <button class="btn-danger" onclick="lockGate()">Immediate Emergency Lock</button>
       </div>
       <div id="msgAlert"></div>
@@ -554,31 +552,6 @@ const dashboardHTML = `<!DOCTYPE html>
       alert.style.border = '1px solid ' + (isError ? '#da3633' : '#238636');
       alert.innerText = msg;
       setTimeout(() => { alert.style.display = 'none'; }, 4000);
-    }
-
-    async function unlockGate() {
-      const code = document.getElementById('totpCode').value.trim();
-      if (!code) {
-        showAlert("Please enter 6-digit TOTP code", true);
-        return;
-      }
-      try {
-        const res = await fetch('/gate/api/unlock?token=' + encodeURIComponent(token), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: code })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          showAlert(data.message || "Gate unlocked successfully!", false);
-          document.getElementById('totpCode').value = '';
-          fetchStatus();
-        } else {
-          showAlert(data.error || "Unlock failed", true);
-        }
-      } catch (e) {
-        showAlert("Network error: " + e.message, true);
-      }
     }
 
     async function lockGate() {
