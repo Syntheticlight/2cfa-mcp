@@ -20,6 +20,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Validate shell scripts
+        run: bash -n scripts/daemon.sh
+
       - name: Vet
         run: go vet ./...
 
