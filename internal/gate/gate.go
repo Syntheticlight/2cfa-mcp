@@ -455,7 +455,7 @@ func (m *Manager) AuthorizeManagement(leaseToken, currentCode, clientKey string)
 }
 
 // CreateLease verifies the TOTP code and mints a dynamic lease token.
-// durationMinutes == 0 means permanent (never expires).
+// durationMinutes == 0 means no time expiry; explicit lock/revocation, 2FA rotation/disable, or process restart still invalidates the lease.
 func (m *Manager) CreateLease(code string, durationMinutes int, clientIP, country string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
