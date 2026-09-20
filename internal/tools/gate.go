@@ -16,7 +16,7 @@ func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
 	setupTool := mcp.NewTool("setup_2fa",
 		mcp.WithDescription("Enable, disable, or configure 2FA Google Authenticator protection directly via chat conversation."),
 		mcp.WithBoolean("enable", mcp.Required(), mcp.Description("true to turn ON 2FA physical gate, false to turn OFF (use token-only direct connect)")),
-		mcp.WithString("secret", mcp.Description("Optional Base32 secret string (e.g. JBSWY3DPEHPK3PXP) for Google Authenticator")),
+		mcp.WithString("secret", mcp.Description("Optional Base32 secret string (e.g. JBSWY3DPEHPK3PXP). If omitted when enabling, a secure secret is automatically generated.")),
 	)
 
 	s.AddTool(setupTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -26,16 +26,26 @@ func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
 		}
 		secret := request.GetString("secret", "")
 
-		if enable && secret == "" && !gateMgr.HasSecret() {
-			return mcp.NewToolResultError("Cannot enable 2FA: No TOTP secret provided and none currently configured. Please provide 'secret' (e.g. your Google Authenticator Base32 secret string like JBSWY3DPEHPK3PXP)."), nil
-		}
-
-		if err := gateMgr.Configure2FA(secret, enable); err != nil {
+		activeSecret, err := gateMgr.Configure2FA(secret, enable)
+		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to configure 2FA: %v. Please provide a valid Base32 secret (A-Z, 2-7).", err)), nil
 		}
 
 		if enable {
-			return mcp.NewToolResultText("2FA Gate has been ENABLED. The server is now protected by Google Authenticator. Future tool calls will require unlocking via 'unlock_gate'."), nil
+			otpauthURI := fmt.Sprintf("otpauth://totp/2cfa-mcp?secret=%s&issuer=2cfa-mcp", activeSecret)
+			msg := fmt.Sprintf(`2FA Gate has been ENABLED!
+The server is now protected by Google Authenticator.
+
+=== 2FA Credentials ===
+Base32 Secret: %s
+OTP Auth URI:  %s
+
+=== Instructions for Assistant & User ===
+1. You can manually enter the Base32 Secret into Google Authenticator, Microsoft Authenticator, 1Password, or iOS Passwords, or add the OTP Auth URI.
+2. Configuration has been automatically persisted across server restarts.
+3. Subsequent sensitive operations (commands, file operations) now require verification via 'unlock_gate(code="<6-digit-code>")'.`,
+				activeSecret, otpauthURI)
+			return mcp.NewToolResultText(msg), nil
 		}
 		return mcp.NewToolResultText("2FA Gate has been DISABLED. The server is now in default Token-only direct mode (no 2FA required)."), nil
 	})

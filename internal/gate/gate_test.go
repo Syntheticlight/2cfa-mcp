@@ -3,6 +3,9 @@ package gate
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -114,5 +117,50 @@ func TestGateHandlerCaseInsensitiveBearer(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 with lowercase bearer token, got %d", rec.Code)
+	}
+}
+
+func TestAutoGenerateSecretAndPersistEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	envFile := filepath.Join(tmpDir, ".env")
+
+	mgr := NewManager(Config{
+		Enabled: false,
+		EnvPath: envFile,
+	})
+
+	// 1. Configure2FA with empty secret -> Should auto generate Base32 secret!
+	secret, err := mgr.Configure2FA("", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(secret) != 32 {
+		t.Errorf("expected 32-character Base32 secret, got: %s (len: %d)", secret, len(secret))
+	}
+	if err := ValidateSecretFormat(secret); err != nil {
+		t.Errorf("generated secret is not valid Base32: %v", err)
+	}
+
+	// 2. Check that .env file was created and contains the secret and ENABLE_2FA_GATE=true
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("failed to read persisted .env: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "ENABLE_2FA_GATE=true") {
+		t.Errorf("expected .env to contain ENABLE_2FA_GATE=true, got: %s", content)
+	}
+	if !strings.Contains(content, "TOTP_SECRET="+secret) {
+		t.Errorf("expected .env to contain TOTP_SECRET=%s, got: %s", secret, content)
+	}
+
+	// 3. Disable 2FA -> should update .env
+	_, err = mgr.Configure2FA("", false)
+	if err != nil {
+		t.Fatalf("unexpected error disabling 2FA: %v", err)
+	}
+	data, _ = os.ReadFile(envFile)
+	if !strings.Contains(string(data), "ENABLE_2FA_GATE=false") {
+		t.Errorf("expected .env to contain ENABLE_2FA_GATE=false, got: %s", string(data))
 	}
 }

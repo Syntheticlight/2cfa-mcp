@@ -28,6 +28,9 @@ func init() {
 }
 
 func main() {
+	// Auto-load .env if present and set env vars not yet configured in OS
+	envPath := loadDotEnv(".env", "../.env")
+
 	// Parse CLI flags and environment variables
 	portFlag := flag.Int("port", getEnvInt("PORT", 2232), "Server listening port")
 	tokenFlag := flag.String("token", os.Getenv("AUTH_TOKEN"), "Secret authentication token")
@@ -51,6 +54,7 @@ func main() {
 		ExecTimeout:   time.Duration(*timeoutFlag) * time.Second,
 		Enable2FAGate: *enable2FAFlag,
 		TOTPSecret:    *totpSecretFlag,
+		EnvPath:       envPath,
 	}
 
 	srv, err := server.NewServer(cfg)
@@ -121,4 +125,26 @@ func getEnvBool(key string, defaultVal bool) bool {
 		return v == "true" || v == "1" || v == "yes" || v == "on"
 	}
 	return defaultVal
+}
+
+func loadDotEnv(paths ...string) string {
+	for _, p := range paths {
+		if data, err := os.ReadFile(p); err == nil {
+			lines := strings.Split(string(data), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line == "" || strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
+					continue
+				}
+				parts := strings.SplitN(line, "=", 2)
+				k := strings.TrimSpace(parts[0])
+				v := strings.TrimSpace(parts[1])
+				if os.Getenv(k) == "" {
+					_ = os.Setenv(k, v)
+				}
+			}
+			return p
+		}
+	}
+	return ".env"
 }

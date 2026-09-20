@@ -24,6 +24,7 @@ type ServerConfig struct {
 	ExecTimeout   time.Duration
 	Enable2FAGate bool
 	TOTPSecret    string
+	EnvPath       string
 }
 
 // Server holds the HTTP server and MCP server components.
@@ -54,6 +55,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	gateMgr := gate.NewManager(gate.Config{
 		Enabled:    cfg.Enable2FAGate,
 		TOTPSecret: cfg.TOTPSecret,
+		EnvPath:    cfg.EnvPath,
 	})
 
 	// Register tools with gate protection and audit tracking

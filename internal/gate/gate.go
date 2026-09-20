@@ -4,8 +4,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +49,7 @@ type Manager struct {
 	mu         sync.RWMutex
 	enabled    bool
 	totpSecret string
+	envPath    string
 	leases     map[string]*Lease
 	auditRing  []AuditEntry
 	maxAudits  int
@@ -56,13 +59,21 @@ type Manager struct {
 type Config struct {
 	Enabled    bool
 	TOTPSecret string
+	EnvPath    string
 }
 
 // NewManager creates a Gate Manager instance.
 func NewManager(cfg Config) *Manager {
+	envPath := cfg.EnvPath
+	if envPath == "" {
+		if _, err := os.Stat(".env"); err == nil {
+			envPath = ".env"
+		}
+	}
 	return &Manager{
 		enabled:    cfg.Enabled,
 		totpSecret: cfg.TOTPSecret,
+		envPath:    envPath,
 		leases:     make(map[string]*Lease),
 		maxAudits:  20,
 		auditRing:  make([]AuditEntry, 0, 20),
@@ -70,21 +81,47 @@ func NewManager(cfg Config) *Manager {
 }
 
 // Configure2FA dynamically updates the 2FA secret and enabled toggle via chat or API.
-func (m *Manager) Configure2FA(secret string, enable bool) error {
+// If enable is true and secret is empty, it automatically generates a secure 160-bit Base32 secret.
+// Automatically persists changes to .env file if available.
+// Returns the active Base32 secret string.
+func (m *Manager) Configure2FA(secret string, enable bool) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if secret != "" {
-		if err := ValidateSecretFormat(secret); err != nil {
-			return err
+	activeSecret := m.totpSecret
+	if enable {
+		if secret != "" {
+			if err := ValidateSecretFormat(secret); err != nil {
+				return "", err
+			}
+			activeSecret = strings.ToUpper(strings.ReplaceAll(secret, " ", ""))
+		} else if activeSecret == "" {
+			sec, err := GenerateRandomSecret()
+			if err != nil {
+				return "", err
+			}
+			activeSecret = sec
 		}
-		m.totpSecret = strings.ToUpper(strings.ReplaceAll(secret, " ", ""))
+		m.totpSecret = activeSecret
 	}
+
 	m.enabled = enable
 	if !enable {
 		m.leases = make(map[string]*Lease)
 	}
-	return nil
+
+	// Auto-persist to .env if envPath is available
+	if m.envPath != "" {
+		updates := map[string]string{
+			"ENABLE_2FA_GATE": fmt.Sprintf("%t", enable),
+		}
+		if enable && m.totpSecret != "" {
+			updates["TOTP_SECRET"] = m.totpSecret
+		}
+		_ = PersistEnv(m.envPath, updates)
+	}
+
+	return m.totpSecret, nil
 }
 
 // HasSecret returns whether a TOTP secret is configured.
@@ -92,6 +129,13 @@ func (m *Manager) HasSecret() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.totpSecret != ""
+}
+
+// GetSecret returns the configured TOTP secret.
+func (m *Manager) GetSecret() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.totpSecret
 }
 
 // IsEnabled returns whether 2FA gate is currently active.
@@ -315,4 +359,49 @@ func generateSecureToken(prefix string) string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return prefix + hex.EncodeToString(b)
+}
+
+// PersistEnv writes or updates key-value pairs in a .env file.
+func PersistEnv(filePath string, updates map[string]string) error {
+	if filePath == "" || len(updates) == 0 {
+		return nil
+	}
+
+	var lines []string
+	foundKeys := make(map[string]bool)
+
+	if data, err := os.ReadFile(filePath); err == nil {
+		rawLines := strings.Split(string(data), "\n")
+		for _, rawLine := range rawLines {
+			trimmed := strings.TrimSpace(rawLine)
+			if strings.HasPrefix(trimmed, "#") || !strings.Contains(trimmed, "=") {
+				lines = append(lines, rawLine)
+				continue
+			}
+
+			parts := strings.SplitN(trimmed, "=", 2)
+			key := strings.TrimSpace(parts[0])
+
+			if newVal, ok := updates[key]; ok {
+				lines = append(lines, fmt.Sprintf("%s=%s", key, newVal))
+				foundKeys[key] = true
+			} else {
+				lines = append(lines, rawLine)
+			}
+		}
+	}
+
+	// Append any new keys that were not present in existing .env
+	for key, val := range updates {
+		if !foundKeys[key] {
+			lines = append(lines, fmt.Sprintf("%s=%s", key, val))
+		}
+	}
+
+	outContent := strings.Join(lines, "\n")
+	if !strings.HasSuffix(outContent, "\n") {
+		outContent += "\n"
+	}
+
+	return os.WriteFile(filePath, []byte(outContent), 0600)
 }

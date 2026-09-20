@@ -2,6 +2,7 @@ package gate
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha1"
 	"crypto/subtle"
 	"encoding/base32"
@@ -16,6 +17,15 @@ const (
 	TOTPPeriod = 30 // 30 seconds interval per RFC 6238
 	TOTPDigits = 6  // 6 digits
 )
+
+// GenerateRandomSecret generates a 20-byte (160-bit) cryptographically secure Base32 TOTP secret.
+func GenerateRandomSecret() (string, error) {
+	b := make([]byte, 20)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate random secret: %w", err)
+	}
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b), nil
+}
 
 // ValidateSecretFormat checks whether a string is a valid Base32 secret.
 func ValidateSecretFormat(secret string) error {

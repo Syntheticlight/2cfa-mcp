@@ -172,14 +172,14 @@ func TestSetup2FAValidation(t *testing.T) {
 
 	setupTool := mcpSrv.GetTool("setup_2fa")
 
-	// 1. Enabling without any secret when none configured
+	// 1. Enabling without any secret when none configured -> Auto-generates Base32 secret!
 	reqNoSecret := mcp.CallToolRequest{}
 	reqNoSecret.Params.Name = "setup_2fa"
 	reqNoSecret.Params.Arguments = map[string]any{"enable": true}
 
 	res, err := setupTool.Handler(context.Background(), reqNoSecret)
-	if err != nil || !res.IsError {
-		t.Errorf("expected error when enabling 2FA without secret, got: %+v", res)
+	if err != nil || res.IsError {
+		t.Errorf("expected success with auto-generated secret, got: %+v", res)
 	}
 
 	// 2. Enabling with invalid Base32
