@@ -142,7 +142,12 @@ func loadDotEnv(paths ...string) string {
 				k := strings.TrimSpace(parts[0])
 				v := strings.TrimSpace(parts[1])
 				v = strings.Trim(v, "\"'")
-				_ = os.Setenv(k, v)
+				// Explicit process environment wins over .env. This makes
+				// systemd/Docker/Termux wrappers predictable and matches the
+				// documented precedence.
+				if _, exists := os.LookupEnv(k); !exists {
+					_ = os.Setenv(k, v)
+				}
 			}
 			abs, err := filepath.Abs(p)
 			if err == nil {
