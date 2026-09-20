@@ -52,6 +52,7 @@ const (
 	totpClientFailureLimit = 5
 	totpGlobalFailureLimit = 25
 	totpUsedRetention      = 3 * time.Minute
+	maxActiveLeases        = 128
 )
 
 type totpAttemptState struct {
@@ -494,6 +495,7 @@ func (m *Manager) CreateLease(code string, durationMinutes int, clientIP, countr
 		lease.ExpiresAt = now.Add(time.Duration(durationMinutes) * time.Minute)
 	}
 
+	m.enforceLeaseLimitLocked()
 	m.leases[token] = lease
 	return token, nil
 }
@@ -545,6 +547,23 @@ func (m *Manager) purgeExpiredLeasesLocked(now time.Time) {
 		if !lease.ExpiresAt.IsZero() && now.After(lease.ExpiresAt) {
 			delete(m.leases, token)
 		}
+	}
+}
+
+func (m *Manager) enforceLeaseLimitLocked() {
+	for len(m.leases) >= maxActiveLeases {
+		var oldestToken string
+		var oldestTime time.Time
+		for token, lease := range m.leases {
+			if oldestToken == "" || lease.CreatedAt.Before(oldestTime) {
+				oldestToken = token
+				oldestTime = lease.CreatedAt
+			}
+		}
+		if oldestToken == "" {
+			return
+		}
+		delete(m.leases, oldestToken)
 	}
 }
 
