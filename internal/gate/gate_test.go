@@ -164,3 +164,56 @@ func TestAutoGenerateSecretAndPersistEnv(t *testing.T) {
 		t.Errorf("expected .env to contain ENABLE_2FA_GATE=false, got: %s", string(data))
 	}
 }
+
+func TestPendingSecretReuseAndReset(t *testing.T) {
+	mgr := NewManager(Config{Enabled: false})
+
+	// 1. Initial begin setup -> generates Secret A
+	secA, err := mgr.BeginSetup2FA("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 2. Immediate re-call without code -> should return identical Secret A
+	secB, err := mgr.BeginSetup2FA("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if secA != secB {
+		t.Errorf("expected secret to be preserved during pending setup, got %s vs %s", secA, secB)
+	}
+
+	// 3. Re-call with reset -> should generate a new Secret C
+	secC, err := mgr.BeginSetup2FA("reset")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if secC == secA {
+		t.Errorf("expected new secret after reset, got same secret")
+	}
+}
+
+func TestPersistEnvPreservesAuthToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	envFile := filepath.Join(tmpDir, ".env")
+
+	_ = os.Setenv("AUTH_TOKEN", "test-token-preserved-1234")
+	defer os.Unsetenv("AUTH_TOKEN")
+
+	err := PersistEnv(envFile, map[string]string{
+		"ENABLE_2FA_GATE": "true",
+		"TOTP_SECRET":     "JBSWY3DPEHPK3PXP",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("failed to read persisted .env: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "AUTH_TOKEN=test-token-preserved-1234") {
+		t.Errorf("expected .env to preserve AUTH_TOKEN, got: %s", content)
+	}
+}

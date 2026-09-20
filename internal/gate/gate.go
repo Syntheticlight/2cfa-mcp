@@ -89,12 +89,24 @@ func (m *Manager) BeginSetup2FA(customSecret string) (string, error) {
 	defer m.mu.Unlock()
 
 	secret := strings.TrimSpace(customSecret)
+	isReset := strings.EqualFold(secret, "new") || strings.EqualFold(secret, "reset") || strings.EqualFold(secret, "regenerate")
+	if isReset {
+		secret = ""
+	}
+
 	if secret != "" {
 		if err := ValidateSecretFormat(secret); err != nil {
 			return "", err
 		}
 		secret = strings.ToUpper(strings.ReplaceAll(secret, " ", ""))
 	} else {
+		// If a setup was already initiated recently (within 15 minutes) and not yet confirmed,
+		// reuse the pending secret so that if the user/AI asks again or re-requests,
+		// the secret does not silently change under their feet!
+		if !isReset && m.pendingSecret != "" && time.Since(m.pendingAt) < 15*time.Minute {
+			return m.pendingSecret, nil
+		}
+
 		sec, err := GenerateRandomSecret()
 		if err != nil {
 			return "", err
@@ -472,8 +484,10 @@ func PersistEnv(filePath string, updates map[string]string) error {
 			if newVal, ok := updates[key]; ok {
 				lines = append(lines, fmt.Sprintf("%s=%s", key, newVal))
 				foundKeys[key] = true
+				_ = os.Setenv(key, newVal)
 			} else {
 				lines = append(lines, rawLine)
+				foundKeys[key] = true
 			}
 		}
 	}
@@ -481,6 +495,15 @@ func PersistEnv(filePath string, updates map[string]string) error {
 	for key, val := range updates {
 		if !foundKeys[key] {
 			lines = append(lines, fmt.Sprintf("%s=%s", key, val))
+			foundKeys[key] = true
+			_ = os.Setenv(key, val)
+		}
+	}
+
+	// Safety: if AUTH_TOKEN is not in .env but is present in current environment, preserve it!
+	if !foundKeys["AUTH_TOKEN"] {
+		if tok := os.Getenv("AUTH_TOKEN"); tok != "" {
+			lines = append([]string{fmt.Sprintf("AUTH_TOKEN=%s", tok)}, lines...)
 		}
 	}
 

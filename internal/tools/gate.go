@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -35,6 +36,20 @@ func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to disable 2FA: %v", err)), nil
 			}
 			return mcp.NewToolResultText("2FA Gate has been DISABLED. The server is now in default Token-only direct mode (no 2FA required)."), nil
+		}
+
+		// If 2FA is already active and the caller didn't provide a code or a custom/reset secret:
+		if gateMgr.GetState().Enabled && secret == "" && code == "" {
+			state := gateMgr.GetState()
+			msg := fmt.Sprintf(`[2FA IS ALREADY ENABLED & ACTIVE]
+The 2FA security gate is already enabled on this server.
+
+Current Status: %s
+- To UNLOCK the gate for this conversation: call unlock_gate(code="<6-digit-totp>")
+- To TURN OFF 2FA: call setup_2fa(enable=false)
+- To RECONFIGURE with a new key: call setup_2fa(enable=true, secret="reset")`,
+				state.Status)
+			return mcp.NewToolResultText(msg), nil
 		}
 
 		// Stage 2: Code provided -> Verify, activate, and persist!
@@ -74,7 +89,11 @@ Dynamic Lease Token: %s (Auto-unlocked for this session)
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to initiate 2FA setup: %v", err)), nil
 		}
 
-		otpauthURI := fmt.Sprintf("otpauth://totp/2cfa-mcp?secret=%s&issuer=2cfa-mcp", pendingSecret)
+		nodeName, _ := os.Hostname()
+		if nodeName == "" {
+			nodeName = "edge"
+		}
+		otpauthURI := fmt.Sprintf("otpauth://totp/2cfa-mcp:%s?secret=%s&issuer=2cfa-mcp", nodeName, pendingSecret)
 		msg := fmt.Sprintf(`[2FA SETUP - PENDING VERIFICATION]
 A 2FA secret has been generated. 2FA is NOT active yet until verified.
 
@@ -101,6 +120,10 @@ OTP Auth URI:  %s
 	s.AddTool(unlockTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		start := time.Now()
 		ip, country := resolveHeaderIP(request.Header)
+
+		if !gateMgr.GetState().Enabled {
+			return mcp.NewToolResultText("2FA Security Gate is currently DISABLED. The server is operating in default direct token mode. All tools are already 100% unlocked and available without 2FA."), nil
+		}
 
 		code, err := request.RequireString("code")
 		if err != nil || code == "" {

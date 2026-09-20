@@ -10,18 +10,21 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# Load .env configuration if present
-if [ -f "${ROOT_DIR}/.env" ]; then
-    echo "[INFO] Loading environment variables from .env"
-    export $(grep -v '^#' "${ROOT_DIR}/.env" | xargs)
-fi
+# Function to load/reload .env dynamically
+load_env() {
+    if [ -f "${ROOT_DIR}/.env" ]; then
+        set -a
+        . "${ROOT_DIR}/.env"
+        set +a
+    fi
+}
+
+load_env
 
 PORT="${PORT:-2232}"
 AUTH_TOKEN="${AUTH_TOKEN:-}"
 WORKSPACE_PATH="${WORKSPACE_PATH:-${ROOT_DIR}/workspace}"
 EXEC_TIMEOUT="${EXEC_TIMEOUT:-120}"
-ENABLE_2FA_GATE="${ENABLE_2FA_GATE:-false}"
-TOTP_SECRET="${TOTP_SECRET:-}"
 
 if [ -z "${AUTH_TOKEN}" ]; then
     echo "[ERROR] AUTH_TOKEN is not set! Please set AUTH_TOKEN in .env or environment."
@@ -48,14 +51,6 @@ fi
 
 chmod +x "${BINARY}"
 
-echo "=========================================================================="
-echo " Starting 2cfa-mcp Daemon Supervisor"
-echo " Binary:    ${BINARY}"
-echo " Port:      ${PORT}"
-echo " Workspace: ${WORKSPACE_PATH}"
-echo " 2FA Gate:  ${ENABLE_2FA_GATE}"
-echo "=========================================================================="
-
 # Android Termux Environment Setup & Wake Lock Check
 if [ -n "${PREFIX}" ] && [ -d "${PREFIX}/bin" ]; then
     export PATH="${PREFIX}/bin:${PATH}"
@@ -63,41 +58,91 @@ elif [ -d "/data/data/com.termux/files/usr/bin" ]; then
     export PATH="/data/data/com.termux/files/usr/bin:${PATH}"
 fi
 
-if command -v termux-wake-lock >/dev/null 2>&1; then
-    echo "[INFO] Termux detected! Acquiring wake-lock to prevent CPU sleep..."
-    termux-wake-lock
-fi
-
 LOG_FILE="${ROOT_DIR}/2cfa-mcp.log"
+PID_FILE="${ROOT_DIR}/2cfa-mcp.pid"
 
-start_server() {
+start_supervisor_loop() {
+    if command -v termux-wake-lock >/dev/null 2>&1; then
+        echo "[INFO] Termux detected! Acquiring wake-lock to prevent CPU sleep..." >> "${LOG_FILE}"
+        termux-wake-lock
+    fi
+
     while true; do
+        # Dynamically reload .env on every restart iteration so 2FA changes take effect immediately
+        load_env
         echo "[INFO] Starting 2cfa-mcp server instance at $(date)..." >> "${LOG_FILE}"
+
+        # Do NOT pass -2fa or -totp-secret flags: binary natively loads .env as single source of truth!
         "${BINARY}" \
-            -port="${PORT}" \
+            -port="${PORT:-2232}" \
             -token="${AUTH_TOKEN}" \
-            -workspace="${WORKSPACE_PATH}" \
-            -timeout="${EXEC_TIMEOUT}" \
-            -2fa="${ENABLE_2FA_GATE}" \
-            -totp-secret="${TOTP_SECRET}" >> "${LOG_FILE}" 2>&1 || true
+            -workspace="${WORKSPACE_PATH:-${ROOT_DIR}/workspace}" \
+            -timeout="${EXEC_TIMEOUT:-120}" >> "${LOG_FILE}" 2>&1 || true
+
         echo "[WARNING] Server crashed or stopped. Restarting in 3 seconds..." >> "${LOG_FILE}"
         sleep 3
     done
 }
 
 case "$1" in
+    run-supervisor)
+        start_supervisor_loop
+        ;;
     start)
-        nohup bash -c "$(declare -f start_server); start_server" >/dev/null 2>&1 &
-        echo "[SUCCESS] 2cfa-mcp daemon started in background. Logs: ${LOG_FILE}"
+        if [ -f "${PID_FILE}" ]; then
+            OLD_PID=$(cat "${PID_FILE}" 2>/dev/null || true)
+            if [ -n "${OLD_PID}" ] && kill -0 "${OLD_PID}" 2>/dev/null; then
+                echo "[INFO] 2cfa-mcp daemon supervisor is already running (PID: ${OLD_PID})."
+                exit 0
+            fi
+        fi
+
+        echo "=========================================================================="
+        echo " Starting 2cfa-mcp Daemon Supervisor"
+        echo " Binary:    ${BINARY}"
+        echo " Port:      ${PORT}"
+        echo " Workspace: ${WORKSPACE_PATH}"
+        echo " Logs:      ${LOG_FILE}"
+        echo "=========================================================================="
+
+        nohup "${BASH_SOURCE[0]}" run-supervisor >/dev/null 2>&1 &
+        SPID=$!
+        echo "${SPID}" > "${PID_FILE}"
+        echo "[SUCCESS] 2cfa-mcp daemon started in background (Supervisor PID: ${SPID})."
         ;;
     stop)
+        if [ -f "${PID_FILE}" ]; then
+            SPID=$(cat "${PID_FILE}" 2>/dev/null || true)
+            if [ -n "${SPID}" ]; then
+                kill "${SPID}" 2>/dev/null || true
+            fi
+            rm -f "${PID_FILE}"
+        fi
         pkill -f "2cfa-mcp" || true
+
+        if command -v termux-wake-unlock >/dev/null 2>&1; then
+            echo "[INFO] Releasing Termux wake-lock..."
+            termux-wake-unlock 2>/dev/null || true
+        fi
         echo "[SUCCESS] 2cfa-mcp daemon stopped."
         ;;
     status)
-        if pgrep -f "2cfa-mcp" >/dev/null; then
-            echo "[STATUS] 2cfa-mcp is RUNNING (PID: $(pgrep -f "2cfa-mcp" | tr '\n' ' '))"
-        else
+        IS_RUNNING=false
+        if [ -f "${PID_FILE}" ]; then
+            SPID=$(cat "${PID_FILE}" 2>/dev/null || true)
+            if [ -n "${SPID}" ] && kill -0 "${SPID}" 2>/dev/null; then
+                IS_RUNNING=true
+                echo "[STATUS] 2cfa-mcp Supervisor is RUNNING (PID: ${SPID})"
+            fi
+        fi
+
+        PROC_PIDS=$(pgrep -f "2cfa-mcp" 2>/dev/null | tr '\n' ' ' || true)
+        if [ -n "${PROC_PIDS}" ]; then
+            IS_RUNNING=true
+            echo "[STATUS] 2cfa-mcp Processes: ${PROC_PIDS}"
+        fi
+
+        if [ "${IS_RUNNING}" = false ]; then
             echo "[STATUS] 2cfa-mcp is STOPPED"
         fi
         ;;
@@ -150,7 +195,7 @@ case "$1" in
         mv -f "${TMP_FILE}" "${BINARY}"
         echo "[SUCCESS] Updated ${BINARY} successfully."
 
-        if pgrep -f "2cfa-mcp" >/dev/null; then
+        if pgrep -f "2cfa-mcp" >/dev/null || [ -f "${PID_FILE}" ]; then
             echo "[INFO] Restarting 2cfa-mcp daemon..."
             $0 stop
             sleep 1

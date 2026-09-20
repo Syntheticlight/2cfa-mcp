@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -139,12 +140,19 @@ func loadDotEnv(paths ...string) string {
 				parts := strings.SplitN(line, "=", 2)
 				k := strings.TrimSpace(parts[0])
 				v := strings.TrimSpace(parts[1])
-				if os.Getenv(k) == "" {
-					_ = os.Setenv(k, v)
-				}
+				v = strings.Trim(v, "\"'")
+				_ = os.Setenv(k, v)
+			}
+			abs, err := filepath.Abs(p)
+			if err == nil {
+				return abs
 			}
 			return p
 		}
+	}
+	abs, err := filepath.Abs(".env")
+	if err == nil {
+		return abs
 	}
 	return ".env"
 }

@@ -222,3 +222,48 @@ func TestSetup2FAValidation(t *testing.T) {
 		t.Errorf("expected success when confirming with valid code, got: %+v", res)
 	}
 }
+
+func TestSetup2FAWhenAlreadyEnabled(t *testing.T) {
+	gateMgr := gate.NewManager(gate.Config{
+		Enabled:    true,
+		TOTPSecret: "JBSWY3DPEHPK3PXP",
+	})
+	mcpSrv := server.NewMCPServer("test", "1.0.0")
+	RegisterGateTools(mcpSrv, gateMgr)
+
+	setupTool := mcpSrv.GetTool("setup_2fa")
+
+	// Calling setup_2fa(enable=true) without code or secret should return status guidance
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "setup_2fa"
+	req.Params.Arguments = map[string]any{"enable": true}
+
+	res, err := setupTool.Handler(context.Background(), req)
+	if err != nil || res.IsError {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := res.Content[0].(mcp.TextContent).Text
+	if !strings.Contains(text, "ALREADY ENABLED") {
+		t.Errorf("expected response to indicate 2FA is already enabled, got: %s", text)
+	}
+
+	// Calling unlock_gate when 2FA is disabled returns informative direct mode message
+	gateMgrDisable := gate.NewManager(gate.Config{Enabled: false})
+	mcpSrv2 := server.NewMCPServer("test2", "1.0.0")
+	RegisterGateTools(mcpSrv2, gateMgrDisable)
+	unlockTool2 := mcpSrv2.GetTool("unlock_gate")
+
+	unlockReq := mcp.CallToolRequest{}
+	unlockReq.Params.Name = "unlock_gate"
+	unlockReq.Params.Arguments = map[string]any{"code": "123456"}
+
+	unlockRes, err := unlockTool2.Handler(context.Background(), unlockReq)
+	if err != nil || unlockRes.IsError {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	unlockText := unlockRes.Content[0].(mcp.TextContent).Text
+	if !strings.Contains(unlockText, "currently DISABLED") {
+		t.Errorf("expected response to indicate 2FA is disabled, got: %s", unlockText)
+	}
+}
