@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/subtle"
+	"net"
 	"net/http"
 	"strings"
 )
@@ -25,6 +26,8 @@ func NewMiddleware(token string) *Middleware {
 // 3. URL path prefix/segment matching /mcp/<TOKEN>/...
 func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setCanonicalClientHeaders(r)
+
 		// Set CORS headers for all requests (essential for browser-based clients like ChatGPT Web)
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE, HEAD")
@@ -67,6 +70,74 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+const (
+	CanonicalClientIPHeader      = "X-2CFA-Client-IP"
+	CanonicalClientCountryHeader = "X-2CFA-Client-Country"
+)
+
+func remoteHost(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err == nil && host != "" {
+		return host
+	}
+	return strings.TrimSpace(remoteAddr)
+}
+
+func validForwardedIP(value string) string {
+	value = strings.TrimSpace(value)
+	if ip := net.ParseIP(value); ip != nil {
+		return ip.String()
+	}
+	return ""
+}
+
+func firstForwardedIP(value string) string {
+	for _, part := range strings.Split(value, ",") {
+		if ip := validForwardedIP(part); ip != "" {
+			return ip
+		}
+	}
+	return ""
+}
+
+func trustedProxyPeer(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
+}
+
+// setCanonicalClientHeaders converts proxy-controlled identity headers into
+// server-owned canonical headers. Forwarded headers are trusted only when the
+// immediate peer is loopback/private (the normal Cloudflare Tunnel, FRP, Nginx
+// or local reverse-proxy deployment). Direct public clients cannot spoof the
+// IP used for audit logs and per-client TOTP rate limiting.
+func setCanonicalClientHeaders(r *http.Request) {
+	peer := remoteHost(r.RemoteAddr)
+	clientIP := peer
+	country := "DIRECT"
+
+	if trustedProxyPeer(peer) {
+		country = strings.TrimSpace(r.Header.Get("CF-IPCountry"))
+		if country == "" {
+			country = "LOCAL"
+		}
+
+		switch {
+		case validForwardedIP(r.Header.Get("CF-Connecting-IP")) != "":
+			clientIP = validForwardedIP(r.Header.Get("CF-Connecting-IP"))
+		case firstForwardedIP(r.Header.Get("X-Forwarded-For")) != "":
+			clientIP = firstForwardedIP(r.Header.Get("X-Forwarded-For"))
+		case validForwardedIP(r.Header.Get("X-Real-IP")) != "":
+			clientIP = validForwardedIP(r.Header.Get("X-Real-IP"))
+		}
+	}
+
+	if clientIP == "" {
+		clientIP = "unknown"
+	}
+	r.Header.Set(CanonicalClientIPHeader, clientIP)
+	r.Header.Set(CanonicalClientCountryHeader, country)
 }
 
 // extractToken extracts token from Header, Query, or Path.
