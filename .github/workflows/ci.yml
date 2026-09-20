@@ -20,5 +20,26 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Validate shell scripts
+        run: bash -n scripts/daemon.sh
+
+      - name: Vet
+        run: go vet ./...
+
       - name: Test
         run: go test ./...
+
+      - name: Cross-build Linux amd64
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/2cfa-mcp-linux-amd64 ./cmd/server
+
+      - name: Cross-build Linux arm64
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/2cfa-mcp-linux-arm64 ./cmd/server
+
+      - name: Cross-build Android arm64
+        run: CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -o /tmp/2cfa-mcp-android-arm64 ./cmd/server
+
+      - name: Cross-build Windows amd64
+        run: CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o /tmp/2cfa-mcp-windows-amd64.exe ./cmd/server
+
+      - name: Cross-build macOS arm64
+        run: CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o /tmp/2cfa-mcp-darwin-arm64 ./cmd/server

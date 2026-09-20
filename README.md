@@ -28,7 +28,7 @@
 
 ## 为什么选择 2cfa-mcp？
 
-1. **告别 Node.js 内存笨重**：传统基于 Node.js 的 MCP 服务动辄消耗 100MB~150MB V8 内存，手机后台频繁被杀。本项目采用 Go 1.22+ 编写，运行时常驻内存仅 **10MB ~ 15MB RAM**，单文件静态二进制仅 **~8MB**。
+1. **告别 Node.js 内存笨重**：传统基于 Node.js 的 MCP 服务动辄消耗 100MB~150MB V8 内存，手机后台频繁被杀。本项目采用 Go 1.26.1+ 编写，运行时常驻内存仅 **10MB ~ 15MB RAM**，单文件静态二进制仅 **~8MB**。
 2. **彻底解决未鉴权泄密隐患**：重构了社区项目中未鉴权 `/health` 导致 Token 泄露的致命隐患，实现全链路零泄露设计（Zero-Leakage）与基于 `filepath.Clean` 的强制路径防穿越保护。
 3. **首创对话内隐式租约机制**：在对话中直接报一次 6 位 TOTP 动态码完成解锁，签发隐式凭证（`lease_token`）。AI 在后台数据流中静默携带，聊天界面干干净净，无惧底层网络重连与掉线！
 
@@ -128,7 +128,7 @@ chmod +x scripts/daemon.sh
 # 查看状态
 ./scripts/daemon.sh status
 
-# 一键平滑安全升级至最新版（透明开源，绝非黑盒静默代码）
+# 一键平滑安全升级至最新版（v1.0.5+ 会校验 Release 的 SHA256SUMS，校验失败拒绝替换二进制）
 ./scripts/daemon.sh update
 
 # 一键启动 Cloudflare 免费公网隧道
@@ -164,7 +164,7 @@ https://xxx-xxx-xxx.trycloudflare.com
      > URL 填写：`https://<你的穿透域名>/sse`  
      > 鉴权方式选择 **Bearer Token**，填入你的 `AUTH_TOKEN`。
 6. 点击 **Save & Connect（保存并连接）**。
-   - 连接成功后，ChatGPT 将自动加载并显示 8 个安全工具（`setup_2fa`, `unlock_gate`, `execute_command` 等）。
+   - 连接成功后，ChatGPT 将自动加载并显示 10 个工具（`setup_2fa`, `unlock_gate`, `execute_command` 等）。
 
 ---
 
@@ -181,7 +181,7 @@ https://xxx-xxx-xxx.trycloudflare.com
    ```
 5. 在 **Instructions（系统指令提示词）** 中加入以下关键上下文引导：
    ```markdown
-   你连接了远程 2cfa-mcp 服务器。你的工作区位于受限安全目录内。
+   你连接了远程 2cfa-mcp 服务器。read_file/write_file/list_dir 受工作区路径保护；execute_command 是继承服务进程系统权限的完整 Shell，不是文件系统沙箱。
    如果执行命令或读写文件时提示 2FA 锁定：
    1. 主动提示用户提供 Google Authenticator 上的 6 位 TOTP 动态码；
    2. 收到验证码后调用 unlock_gate(code="...") 解锁并获取 lease_token；
@@ -277,7 +277,7 @@ https://<你的穿透域名>/gate?token=<你的AUTH_TOKEN>
 <a name="english-documentation"></a>
 # English Documentation
 
-`2cfa-mcp` is an ultra-lightweight, high-security remote **Model Context Protocol (MCP)** server implemented in **Go 1.22+**. Designed specifically for **Android Termux (24/7 background alive)**, **low-spec Linux VPS (512MB RAM)**, and **Raspberry Pi**, it connects ChatGPT Web and remote AI agents to edge devices with minimal footprint (~12MB RAM) and zero-friction security.
+`2cfa-mcp` is an ultra-lightweight, high-security remote **Model Context Protocol (MCP)** server implemented in **Go 1.26.1+**. Designed specifically for **Android Termux (24/7 background alive)**, **low-spec Linux VPS (512MB RAM)**, and **Raspberry Pi**, it connects ChatGPT Web and remote AI agents to edge devices with minimal footprint (~12MB RAM) and zero-friction security.
 
 ## Core Architecture: 3 Simple Modes (Zero-Friction Mental Model)
 

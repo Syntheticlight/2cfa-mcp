@@ -60,6 +60,16 @@ fi
 
 LOG_FILE="${ROOT_DIR}/2cfa-mcp.log"
 PID_FILE="${ROOT_DIR}/2cfa-mcp.pid"
+MAX_LOG_BYTES="${MAX_LOG_BYTES:-10485760}" # 10 MiB, keep one rotated copy
+
+rotate_log_if_needed() {
+    [ -f "${LOG_FILE}" ] || return 0
+    LOG_SIZE=$(wc -c < "${LOG_FILE}" 2>/dev/null | tr -d " " || echo 0)
+    if [ "${LOG_SIZE:-0}" -ge "${MAX_LOG_BYTES}" ]; then
+        cp -f "${LOG_FILE}" "${LOG_FILE}.1" 2>/dev/null || true
+        : > "${LOG_FILE}"
+    fi
+}
 
 start_supervisor_loop() {
     if command -v termux-wake-lock >/dev/null 2>&1; then
@@ -73,11 +83,21 @@ start_supervisor_loop() {
         echo "[INFO] Starting 2cfa-mcp server instance at $(date)..." >> "${LOG_FILE}"
 
         # Do NOT pass -2fa or -totp-secret flags: binary natively loads .env as single source of truth!
+        # AUTH_TOKEN stays in the environment; never place secrets in argv where
+        # they can be exposed through ps or /proc/<pid>/cmdline.
+        rotate_log_if_needed
         "${BINARY}" \
             -port="${PORT:-2232}" \
-            -token="${AUTH_TOKEN}" \
             -workspace="${WORKSPACE_PATH:-${ROOT_DIR}/workspace}" \
-            -timeout="${EXEC_TIMEOUT:-120}" >> "${LOG_FILE}" 2>&1 || true
+            -timeout="${EXEC_TIMEOUT:-120}" >> "${LOG_FILE}" 2>&1 &
+        SERVER_PID=$!
+
+        # Keep long-running installations from growing a single log forever.
+        while kill -0 "${SERVER_PID}" 2>/dev/null; do
+            sleep 60
+            rotate_log_if_needed
+        done
+        wait "${SERVER_PID}" 2>/dev/null || true
 
         echo "[WARNING] Server crashed or stopped. Restarting in 3 seconds..." >> "${LOG_FILE}"
         sleep 3
@@ -191,9 +211,41 @@ case "$1" in
             exit 1
         fi
 
+        CHECKSUM_URL="https://github.com/Syntheticlight/2cfa-mcp/releases/latest/download/SHA256SUMS"
+        CHECKSUM_FILE="${ROOT_DIR}/build/SHA256SUMS.tmp"
+        if ! curl -sSL -f -o "${CHECKSUM_FILE}" "${CHECKSUM_URL}"; then
+            echo "[ERROR] Release checksum manifest is missing. Refusing unverified update."
+            rm -f "${TMP_FILE}" "${CHECKSUM_FILE}"
+            exit 1
+        fi
+
+        EXPECTED_SHA=$(awk -v asset="${TARGET_ASSET}" '$2 == asset || $2 == ("*" asset) {print $1; exit}' "${CHECKSUM_FILE}")
+        if [ -z "${EXPECTED_SHA}" ]; then
+            echo "[ERROR] No checksum found for ${TARGET_ASSET}. Aborting."
+            rm -f "${TMP_FILE}" "${CHECKSUM_FILE}"
+            exit 1
+        fi
+
+        if command -v sha256sum >/dev/null 2>&1; then
+            ACTUAL_SHA=$(sha256sum "${TMP_FILE}" | awk '{print $1}')
+        elif command -v shasum >/dev/null 2>&1; then
+            ACTUAL_SHA=$(shasum -a 256 "${TMP_FILE}" | awk '{print $1}')
+        else
+            echo "[ERROR] No SHA-256 utility found (sha256sum/shasum). Refusing unverified update."
+            rm -f "${TMP_FILE}" "${CHECKSUM_FILE}"
+            exit 1
+        fi
+
+        if [ "${ACTUAL_SHA}" != "${EXPECTED_SHA}" ]; then
+            echo "[ERROR] SHA-256 mismatch for ${TARGET_ASSET}. Aborting update."
+            rm -f "${TMP_FILE}" "${CHECKSUM_FILE}"
+            exit 1
+        fi
+
+        rm -f "${CHECKSUM_FILE}"
         chmod +x "${TMP_FILE}"
         mv -f "${TMP_FILE}" "${BINARY}"
-        echo "[SUCCESS] Updated ${BINARY} successfully."
+        echo "[SUCCESS] Updated ${BINARY} successfully (SHA-256 verified)."
 
         if pgrep -f "2cfa-mcp" >/dev/null || [ -f "${PID_FILE}" ]; then
             echo "[INFO] Restarting 2cfa-mcp daemon..."

@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v1.0.5"
+        required: true
+        default: "v1.0.5"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.tag }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION=$(sed -n 's/.*CurrentVersion = "\(v[^"]*\)".*/\1/p' internal/updater/updater.go | head -n1)
+          fi
+
+          if [ -z "${VERSION}" ]; then
+            echo "Unable to resolve release version"
+            exit 1
+          fi
+
+          grep -Fq "CurrentVersion = \"${VERSION}\"" internal/updater/updater.go || {
+            echo "CurrentVersion does not match release version ${VERSION}"
+            exit 1
+          }
+
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+          if gh release view "${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+            echo "Release ${VERSION} already exists; nothing to publish."
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Set up Go
+        if: steps.version.outputs.exists != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        if: steps.version.outputs.exists != 'true'
+        run: go test ./...
+
+      - name: Build release binaries
+        if: steps.version.outputs.exists != 'true'
+        shell: bash
+        run: |
+          mkdir -p build
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -ldflags="-s -w" -o build/2cfa-mcp-android-arm64 ./cmd/server
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o build/2cfa-mcp-linux-arm64 ./cmd/server
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o build/2cfa-mcp-linux-amd64 ./cmd/server
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o build/2cfa-mcp-darwin-amd64 ./cmd/server
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o build/2cfa-mcp-darwin-arm64 ./cmd/server
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o build/2cfa-mcp-windows-amd64.exe ./cmd/server
+          (
+            cd build
+            sha256sum 2cfa-mcp-* > SHA256SUMS
+          )
+
+      - name: Create GitHub release
+        if: steps.version.outputs.exists != 'true'
+        shell: bash
+        run: |
+          gh release create "${VERSION}" build/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "${VERSION}" \
+            --generate-notes

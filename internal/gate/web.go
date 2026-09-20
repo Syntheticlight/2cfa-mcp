@@ -377,7 +377,7 @@ const dashboardHTML = `<!DOCTYPE html>
       <div class="brand">
         <svg height="22" viewBox="0 0 24 24" width="22" fill="#58a6ff"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
         <h1>2cfa-mcp 2FA Gate</h1>
-        <span>v1.0.0</span>
+        <span>v1.0.5</span>
       </div>
       <div id="statusBadge" class="status-pill locked">Checking...</div>
     </header>
@@ -439,6 +439,16 @@ const dashboardHTML = `<!DOCTYPE html>
   <script>
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token') || '';
+
+    function escapeHTML(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[ch]));
+    }
 
     function formatSeconds(sec) {
       if (sec <= 0) return "00:00:00";
@@ -526,12 +536,12 @@ const dashboardHTML = `<!DOCTYPE html>
         if (a.status === 'LOCKED') badgeClass = 'badge-locked';
 
         return '<tr>' +
-          '<td>' + time + '</td>' +
-          '<td><code>' + a.tool_name + '</code></td>' +
-          '<td>' + a.client_ip + '<span class="country-tag">' + a.country + '</span></td>' +
-          '<td>' + a.duration_ms + ' ms</td>' +
-          '<td><span class="badge ' + badgeClass + '">' + a.status + '</span></td>' +
-          '<td style="color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (a.message || '-') + '</td>' +
+          '<td>' + escapeHTML(time) + '</td>' +
+          '<td><code>' + escapeHTML(a.tool_name) + '</code></td>' +
+          '<td>' + escapeHTML(a.client_ip) + '<span class="country-tag">' + escapeHTML(a.country) + '</span></td>' +
+          '<td>' + escapeHTML(a.duration_ms) + ' ms</td>' +
+          '<td><span class="badge ' + badgeClass + '">' + escapeHTML(a.status) + '</span></td>' +
+          '<td style="color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHTML(a.message || '-') + '</td>' +
           '</tr>';
       }).join('');
     }

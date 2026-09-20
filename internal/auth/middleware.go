@@ -45,7 +45,7 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 		}
 
 		// Public endpoints or gate handler bypass authentication
-		if r.URL.Path == "/health" || r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, "/gate") {
+		if r.URL.Path == "/health" || r.URL.Path == "/healthz" || r.URL.Path == "/gate" || strings.HasPrefix(r.URL.Path, "/gate/") {
 			next.ServeHTTP(w, r)
 			return
 		}

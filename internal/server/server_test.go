@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -200,5 +201,33 @@ func TestSSERoutingTrailingSlashAndDirectAccept(t *testing.T) {
 
 	if recDirect.Header().Get("Content-Type") != "text/event-stream" {
 		t.Errorf("expected text/event-stream for direct accept header, got %s", recDirect.Header().Get("Content-Type"))
+	}
+}
+
+
+func TestOversizedMCPRequestRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	token := "body-limit-token"
+	cfg := ServerConfig{
+		Port:          2232,
+		AuthToken:     token,
+		WorkspacePath: tmpDir,
+		ExecTimeout:   120 * time.Second,
+	}
+
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	body := bytes.NewReader(make([]byte, MaxRequestBodyBytes+1))
+	req := httptest.NewRequest(http.MethodPost, "/mcp/"+token, body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.httpSrv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected %d for oversized body, got %d", http.StatusRequestEntityTooLarge, rec.Code)
 	}
 }
