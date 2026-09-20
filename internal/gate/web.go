@@ -410,11 +410,12 @@ const dashboardHTML = `<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="actions-grid">
-        <input type="text" id="totpCode" class="input-code" placeholder="6-digit TOTP Code" maxlength="6" autocomplete="off" />
-        <button class="btn-primary" onclick="unlockGate()">Unlock with TOTP</button>
+      <div class="actions-grid" style="grid-template-columns:1fr;">
         <button class="btn-danger" onclick="lockGate()">Immediate Emergency Lock</button>
       </div>
+      <small style="color:var(--text-muted);font-size:11px;display:block;margin-top:10px;">
+        Unlock MCP access in chat with unlock_gate. This dashboard reports active leases but does not globally open the gate.
+      </small>
       <div id="msgAlert"></div>
     </div>
 
@@ -519,19 +520,11 @@ const dashboardHTML = `<!DOCTYPE html>
         return;
       }
 
-      const isUnlocked = state.status === 'UNLOCKED' || state.unlocked;
-      gateUnlocked = isUnlocked;
-      if (isUnlocked) {
-        badge.className = 'status-pill unlocked';
-        badge.innerText = 'Gate Unlocked';
-        gateBox.innerText = 'OPEN (ACTIVE)';
-        leasesBox.innerText = (state.active_leases_count || 1) + ' ACTIVE';
-      } else {
-        badge.className = 'status-pill locked';
-        badge.innerText = 'Physically Locked';
-        gateBox.innerText = 'LOCKED';
-        leasesBox.innerText = '0 ACTIVE';
-      }
+      gateUnlocked = false;
+      badge.className = 'status-pill locked';
+      badge.innerText = '2FA Enabled';
+      gateBox.innerText = 'PROTECTED';
+      leasesBox.innerText = (state.active_leases_count || 0) + ' ACTIVE';
     }
 
     function renderAudits(audits) {
@@ -565,31 +558,6 @@ const dashboardHTML = `<!DOCTYPE html>
       alert.style.border = '1px solid ' + (isError ? '#da3633' : '#238636');
       alert.innerText = msg;
       setTimeout(() => { alert.style.display = 'none'; }, 4000);
-    }
-
-    async function unlockGate() {
-      const code = document.getElementById('totpCode').value.trim();
-      if (!code) {
-        showAlert("Please enter 6-digit TOTP code", true);
-        return;
-      }
-      try {
-        const res = await fetch('/gate/api/unlock?token=' + encodeURIComponent(token), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: code })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          showAlert(data.message || "Gate unlocked successfully!", false);
-          document.getElementById('totpCode').value = '';
-          fetchStatus();
-        } else {
-          showAlert(data.error || "Unlock failed", true);
-        }
-      } catch (e) {
-        showAlert("Network error: " + e.message, true);
-      }
     }
 
     async function lockGate() {
