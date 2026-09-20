@@ -630,37 +630,61 @@ func (m *Manager) GetAudits() []AuditEntry {
 	return res
 }
 
-// ResolveClientIP parses real client IP and country from request headers.
+// ResolveClientIP parses the network peer and only trusts forwarding headers
+// when the immediate peer is loopback (the normal cloudflared/FRP/local-proxy
+// deployment). This prevents direct clients from spoofing audit/rate-limit IPs.
 func ResolveClientIP(r *http.Request) (string, string) {
-	country := r.Header.Get("CF-IPCountry")
-	if country == "" {
-		country = "LOCAL"
+	remoteHost := strings.TrimSpace(r.RemoteAddr)
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
+		remoteHost = host
 	}
+	remoteIP := net.ParseIP(strings.Trim(remoteHost, "[]"))
 
-	if cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfIP != "" {
-		return cfIP, country
-	}
-
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			ip := strings.TrimSpace(parts[0])
-			if ip != "" {
-				return ip, country
+	if remoteIP != nil && remoteIP.IsLoopback() {
+		country := sanitizeCountry(r.Header.Get("CF-IPCountry"), "LOCAL")
+		for _, candidate := range []string{
+			r.Header.Get("CF-Connecting-IP"),
+			firstForwardedIP(r.Header.Get("X-Forwarded-For")),
+			r.Header.Get("X-Real-IP"),
+		} {
+			if ip := net.ParseIP(strings.TrimSpace(candidate)); ip != nil {
+				return ip.String(), country
 			}
 		}
+		return remoteIP.String(), "LOCAL"
 	}
 
-	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-		return xri, country
+	if remoteIP != nil {
+		return remoteIP.String(), "DIRECT"
 	}
-
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil && host != "" {
-		return host, country
+	if remoteHost != "" {
+		return remoteHost, "DIRECT"
 	}
+	return "unknown", "DIRECT"
+}
 
-	return r.RemoteAddr, country
+func firstForwardedIP(value string) string {
+	if value == "" {
+		return ""
+	}
+	parts := strings.Split(value, ",")
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(parts[0])
+}
+
+func sanitizeCountry(value, fallback string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	if len(value) != 2 {
+		return fallback
+	}
+	for _, ch := range value {
+		if ch < 'A' || ch > 'Z' {
+			return fallback
+		}
+	}
+	return value
 }
 
 func generateSecureToken(prefix string) (string, error) {
