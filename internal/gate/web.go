@@ -115,13 +115,13 @@ func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		Country:  country,
 		ToolName: "2fa_unlock",
 		Status:   "SUCCESS",
-		Message:  "Gate unlocked via TOTP",
+		Message:  "Lease issued via TOTP",
 	})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":      "ok",
-		"message":     "Gate unlocked successfully",
+		"message":     "Lease issued successfully; use lease_token on protected MCP tool calls",
 		"lease_token": leaseToken,
 	})
 }
