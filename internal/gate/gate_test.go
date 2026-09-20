@@ -91,19 +91,32 @@ func TestResolveClientIP(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "/mcp", nil)
 	req.RemoteAddr = "192.168.1.100:12345"
 
-	// Fallback RemoteAddr
+	// Direct peers use RemoteAddr and do not trust spoofable forwarding headers.
 	ip, country := ResolveClientIP(req)
-	if ip != "192.168.1.100" || country != "LOCAL" {
-		t.Errorf("unexpected IP/country: %s/%s", ip, country)
+	if ip != "192.168.1.100" || country != "DIRECT" {
+		t.Errorf("unexpected direct IP/country: %s/%s", ip, country)
 	}
 
-	// Cloudflare headers
 	req.Header.Set("CF-Connecting-IP", "203.0.113.195")
 	req.Header.Set("CF-IPCountry", "SG")
+	ip, country = ResolveClientIP(req)
+	if ip != "192.168.1.100" || country != "DIRECT" {
+		t.Errorf("direct client spoofed forwarding identity: %s/%s", ip, country)
+	}
 
+	// Local reverse proxies (cloudflared/FRP/Nginx on the same host) are trusted.
+	req.RemoteAddr = "127.0.0.1:12345"
 	ip, country = ResolveClientIP(req)
 	if ip != "203.0.113.195" || country != "SG" {
-		t.Errorf("unexpected CF IP/country: %s/%s", ip, country)
+		t.Errorf("unexpected trusted proxy IP/country: %s/%s", ip, country)
+	}
+
+	// Invalid header payloads cannot become dashboard HTML/audit identities.
+	req.Header.Set("CF-Connecting-IP", "<img src=x onerror=alert(1)>")
+	req.Header.Set("CF-IPCountry", "<script>")
+	ip, country = ResolveClientIP(req)
+	if ip != "127.0.0.1" || country != "LOCAL" {
+		t.Errorf("expected invalid proxy metadata to be sanitized, got %s/%s", ip, country)
 	}
 }
 
