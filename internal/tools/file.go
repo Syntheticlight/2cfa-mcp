@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,10 @@ import (
 	"github.com/Syntheticlight/2cfa-mcp/internal/security"
 )
 
-const MaxReadFileBytes = 10 * 1024 * 1024 // 10 MB limit for single file read
+const (
+	MaxReadFileBytes = 10 * 1024 * 1024 // 10 MB limit for single file read
+	MaxListEntries   = 5000              // Avoid unbounded directory listings
+)
 
 // RegisterFileTools registers read_file, write_file, and list_dir tools to MCP server.
 func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.Manager) {
@@ -79,9 +83,20 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			return mcp.NewToolResultError(fmt.Sprintf("file size (%d bytes) exceeds max read limit (%d bytes)", info.Size(), MaxReadFileBytes)), nil
 		}
 
-		content, err := os.ReadFile(targetPath)
+		file, err := os.Open(targetPath)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to read file '%s': permission denied or read error", relPath)), nil
+		}
+		defer file.Close()
+
+		// Enforce the limit while reading as well as via the stat hint above, so
+		// a concurrently growing file cannot bypass the memory ceiling.
+		content, err := io.ReadAll(io.LimitReader(file, MaxReadFileBytes+1))
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to read file '%s': permission denied or read error", relPath)), nil
+		}
+		if len(content) > MaxReadFileBytes {
+			return mcp.NewToolResultError(fmt.Sprintf("file exceeds max read limit (%d bytes)", MaxReadFileBytes)), nil
 		}
 
 		gateMgr.AddAudit(gate.AuditEntry{
@@ -213,12 +228,22 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			return mcp.NewToolResultError(fmt.Sprintf("security violation: %v", err)), nil
 		}
 
-		entries, err := os.ReadDir(targetPath)
+		dir, err := os.Open(targetPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return mcp.NewToolResultError(fmt.Sprintf("directory not found: %s", relPath)), nil
 			}
 			return mcp.NewToolResultError(fmt.Sprintf("failed to read directory: %s", relPath)), nil
+		}
+		defer dir.Close()
+
+		entries, readErr := dir.ReadDir(MaxListEntries + 1)
+		if readErr != nil && readErr != io.EOF {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to read directory: %s", relPath)), nil
+		}
+		truncated := len(entries) > MaxListEntries
+		if truncated {
+			entries = entries[:MaxListEntries]
 		}
 
 		var sb strings.Builder
@@ -250,9 +275,12 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			ToolName:   "list_dir",
 			DurationMs: time.Since(start).Milliseconds(),
 			Status:     "SUCCESS",
-			Message:    fmt.Sprintf("Listed %s (%d entries)", relPath, len(entries)),
+			Message:    fmt.Sprintf("Listed directory (%d entries returned)", len(entries)),
 		})
 
+		if truncated {
+			sb.WriteString(fmt.Sprintf("\n... [listing truncated at %d entries]\n", MaxListEntries))
+		}
 		return mcp.NewToolResultText(sb.String()), nil
 	})
 }
