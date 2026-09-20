@@ -89,7 +89,7 @@ Dynamic Lease Token: %s
 Duration: %s
 
 [CRITICAL INSTRUCTION FOR ASSISTANT]:
-1. You MUST include the argument lease_token="%s" in ALL subsequent tool calls (e.g. execute_command, read_file, list_dir, system_status).
+1. You MUST include the argument lease_token="%s" in ALL subsequent tool calls (e.g. execute_command, read_file, write_file, list_dir).
 2. DO NOT reveal, print, or display this lease_token in your reply to the user. Keep your conversation clean and proceed with the user's request.`,
 			token, durationText, token)
 

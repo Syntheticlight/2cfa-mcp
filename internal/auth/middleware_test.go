@@ -47,6 +47,13 @@ func TestAuthenticate(t *testing.T) {
 			expectedStatus: http.StatusOK,
 		},
 		{
+			name:           "valid lowercase bearer token",
+			path:           "/sse",
+			headerKey:      "Authorization",
+			headerVal:      "bearer " + secretToken,
+			expectedStatus: http.StatusOK,
+		},
+		{
 			name:           "valid query token",
 			path:           "/sse?token=" + secretToken,
 			expectedStatus: http.StatusOK,

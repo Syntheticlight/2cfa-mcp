@@ -39,6 +39,7 @@ type StateInfo struct {
 	HasSecret         bool   `json:"has_secret"`
 	ActiveLeasesCount int    `json:"active_leases_count"`
 	Status            string `json:"status"` // "DISABLED", "LOCKED", "UNLOCKED"
+	Unlocked          bool   `json:"unlocked"`
 }
 
 // Manager manages the 2FA lifecycle, leases, and audit logs.
@@ -168,10 +169,9 @@ func (m *Manager) CheckAccess() (bool, string) {
 // RecordActivity placeholder for backward compatibility.
 func (m *Manager) RecordActivity() {}
 
-// Unlock globally for web UI backward compatibility.
-func (m *Manager) Unlock(code string) error {
-	_, err := m.CreateLease(code, 0, "web_ui", "LOCAL")
-	return err
+// Unlock mints a lease for web UI or backward-compatible callers and returns the token.
+func (m *Manager) Unlock(code string) (string, error) {
+	return m.CreateLease(code, 0, "web_ui", "LOCAL")
 }
 
 // RevokeLease removes a specific lease token.
@@ -205,9 +205,13 @@ func (m *Manager) GetState() StateInfo {
 	if m.enabled {
 		if len(m.leases) > 0 {
 			info.Status = "UNLOCKED"
+			info.Unlocked = true
 		} else {
 			info.Status = "LOCKED"
+			info.Unlocked = false
 		}
+	} else {
+		info.Unlocked = true
 	}
 
 	return info

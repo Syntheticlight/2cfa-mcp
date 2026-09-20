@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -85,5 +86,41 @@ func TestGateDashboardAccess(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "2cfa-mcp 2FA Gate") {
 		t.Errorf("expected dashboard HTML response")
+	}
+}
+
+func TestSSERoutingWithPathToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	token := "valid-test-token-777"
+	cfg := ServerConfig{
+		Port:          2232,
+		AuthToken:     token,
+		WorkspacePath: tmpDir,
+		ExecTimeout:   120 * time.Second,
+	}
+
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Connect to /mcp/<TOKEN>/sse with path token
+	req := httptest.NewRequest(http.MethodGet, "/mcp/"+token+"/sse", nil)
+	ctx, cancel := context.WithTimeout(req.Context(), 100*time.Millisecond)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	srv.httpSrv.Handler.ServeHTTP(rec, req)
+
+	// SSE response headers should be text/event-stream
+	if rec.Header().Get("Content-Type") != "text/event-stream" {
+		t.Errorf("expected text/event-stream, got %s", rec.Header().Get("Content-Type"))
+	}
+
+	body := rec.Body.String()
+	// Should contain event: endpoint with dynamic base path /mcp/<TOKEN>/message
+	if !strings.Contains(body, "/mcp/"+token) {
+		t.Errorf("expected SSE endpoint event to contain dynamic base path /mcp/%s, got %s", token, body)
 	}
 }

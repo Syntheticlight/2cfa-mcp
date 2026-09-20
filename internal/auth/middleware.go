@@ -54,8 +54,8 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 func extractToken(r *http.Request, expectedToken string) string {
 	// 1. Check Authorization Header: Bearer <TOKEN>
 	authHeader := r.Header.Get("Authorization")
-	if strings.HasPrefix(authHeader, "Bearer ") {
-		return strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	if len(authHeader) > 7 && strings.EqualFold(authHeader[:7], "bearer ") {
+		return strings.TrimSpace(authHeader[7:])
 	}
 
 	// 2. Check Query parameter ?token=<TOKEN>

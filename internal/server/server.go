@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -40,6 +41,10 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		return nil, fmt.Errorf("workspace path cannot be empty")
 	}
 
+	if err := os.MkdirAll(cfg.WorkspacePath, 0755); err != nil {
+		log.Printf("[WARN] Failed to ensure workspace directory %s exists: %v", cfg.WorkspacePath, err)
+	}
+
 	mcpSrv := server.NewMCPServer(
 		"2cfa-mcp", "1.0.0",
 		server.WithDescription("High-security, low-memory remote MCP Server for edge devices"),
@@ -57,8 +62,20 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	tools.RegisterFileTools(mcpSrv, cfg.WorkspacePath, gateMgr)
 	tools.RegisterSysInfoTool(mcpSrv, gateMgr)
 
-	// Create SSE Server
-	sseSrv := server.NewSSEServer(mcpSrv)
+	// Create SSE Server with dynamic base path and query preservation
+	sseSrv := server.NewSSEServer(
+		mcpSrv,
+		server.WithAppendQueryToMessageEndpoint(),
+		server.WithDynamicBasePath(func(r *http.Request, sessionID string) string {
+			if strings.HasPrefix(r.URL.Path, "/mcp/") {
+				parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/mcp/"), "/")
+				if len(parts) > 0 && parts[0] != "" {
+					return "/mcp/" + parts[0]
+				}
+			}
+			return ""
+		}),
+	)
 
 	// Create Streamable HTTP Server
 	streamableSrv := server.NewStreamableHTTPServer(mcpSrv)
@@ -80,20 +97,26 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		sanitizedPath := auth.SanitizeURL(r.URL.Path, cfg.AuthToken)
 		log.Printf("[REQ] %s %s from %s [%s]", r.Method, sanitizedPath, clientIP, country)
 
-		// Handle /mcp/<TOKEN>/... prefix rewriting for ChatGPT / SSE clients
+		// Direct routing for SSE stream
+		if strings.HasSuffix(r.URL.Path, "/sse") || r.URL.Path == "/sse" {
+			sseSrv.SSEHandler().ServeHTTP(w, r)
+			return
+		}
+
+		// Direct routing for SSE Message endpoint
+		if strings.Contains(r.URL.Path, "/message") {
+			sseSrv.MessageHandler().ServeHTTP(w, r)
+			return
+		}
+
+		// Handle /mcp/<TOKEN>/... prefix rewriting for Streamable HTTP clients
 		if strings.HasPrefix(r.URL.Path, "/mcp/") {
 			trimmedPath := strings.TrimPrefix(r.URL.Path, "/mcp/")
 			if idx := strings.Index(trimmedPath, "/"); idx != -1 {
-				r.URL.Path = trimmedPath[idx:] // e.g. /sse or /messages or /mcp
+				r.URL.Path = trimmedPath[idx:]
 			} else {
 				r.URL.Path = "/"
 			}
-		}
-
-		// Route to appropriate MCP transport
-		if strings.HasPrefix(r.URL.Path, "/sse") || strings.HasPrefix(r.URL.Path, "/message") {
-			sseSrv.ServeHTTP(w, r)
-			return
 		}
 
 		// Fallback to Streamable HTTP transport

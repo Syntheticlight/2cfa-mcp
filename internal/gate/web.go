@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -31,7 +32,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify token
-	if h.authToken != "" && token != h.authToken {
+	if h.authToken == "" || subtle.ConstantTimeCompare([]byte(token), []byte(h.authToken)) != 1 {
 		if strings.HasPrefix(r.URL.Path, "/gate/api/") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
@@ -83,7 +84,8 @@ func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 
 	ip, country := ResolveClientIP(r)
 
-	if err := h.manager.Unlock(req.Code); err != nil {
+	leaseToken, err := h.manager.Unlock(req.Code)
+	if err != nil {
 		h.manager.AddAudit(AuditEntry{
 			ClientIP: ip,
 			Country:  country,
@@ -106,7 +108,11 @@ func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "message": "Gate unlocked successfully"})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":      "ok",
+		"message":     "Gate unlocked successfully",
+		"lease_token": leaseToken,
+	})
 }
 
 func (h *Handler) handleLock(w http.ResponseWriter, r *http.Request) {
@@ -372,23 +378,23 @@ const dashboardHTML = `<!DOCTYPE html>
     </header>
 
     <div class="card">
-      <h3 style="margin-top:0;">Session Lifetime & Dual-Timeout</h3>
+      <h3 style="margin-top:0;">2FA Security Gate & Dynamic Leases</h3>
       <div class="timer-grid">
         <div class="timer-box">
           <div class="timer-label">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            Sliding Idle Lock Countdown
+            Gate Physical Status
           </div>
-          <div class="timer-val" id="idleCountdown">--:--:--</div>
-          <small style="color:var(--text-muted);font-size:11px;">Refreshes upon every AI tool execution</small>
+          <div class="timer-val" id="idleCountdown">CHECKING</div>
+          <small style="color:var(--text-muted);font-size:11px;">Toggle dynamically in chat via setup_2fa</small>
         </div>
         <div class="timer-box">
           <div class="timer-label">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            Absolute Force-Lock Countdown
+            Active Lease Passes
           </div>
-          <div class="timer-val" id="maxCountdown">--:--:--</div>
-          <small style="color:var(--text-muted);font-size:11px;">Strict cutoff from initial unlock</small>
+          <div class="timer-val" id="maxCountdown">0 ACTIVE</div>
+          <small style="color:var(--text-muted);font-size:11px;">Dynamic implicit lease tokens minted</small>
         </div>
       </div>
 
@@ -467,28 +473,30 @@ const dashboardHTML = `<!DOCTYPE html>
 
     function renderState(state) {
       const badge = document.getElementById('statusBadge');
+      const gateBox = document.getElementById('idleCountdown');
+      const leasesBox = document.getElementById('maxCountdown');
+
       if (!state.enabled) {
         badge.className = 'status-pill disabled';
         badge.innerText = 'Gate Disabled';
         gateUnlocked = true;
-        document.getElementById('idleCountdown').innerText = 'DISABLED';
-        document.getElementById('maxCountdown').innerText = 'DISABLED';
+        gateBox.innerText = 'DISABLED';
+        leasesBox.innerText = '100% UNRESTRICTED';
         return;
       }
 
-      gateUnlocked = state.unlocked;
-      if (state.unlocked) {
+      const isUnlocked = state.status === 'UNLOCKED' || state.unlocked;
+      gateUnlocked = isUnlocked;
+      if (isUnlocked) {
         badge.className = 'status-pill unlocked';
         badge.innerText = 'Gate Unlocked';
-        remainingIdle = state.remaining_idle_seconds;
-        remainingMax = state.remaining_max_seconds;
-        document.getElementById('idleCountdown').innerText = formatSeconds(remainingIdle);
-        document.getElementById('maxCountdown').innerText = formatSeconds(remainingMax);
+        gateBox.innerText = 'OPEN (ACTIVE)';
+        leasesBox.innerText = (state.active_leases_count || 1) + ' ACTIVE';
       } else {
         badge.className = 'status-pill locked';
         badge.innerText = 'Physically Locked';
-        document.getElementById('idleCountdown').innerText = '00:00:00';
-        document.getElementById('maxCountdown').innerText = '00:00:00';
+        gateBox.innerText = 'LOCKED';
+        leasesBox.innerText = '0 ACTIVE';
       }
     }
 
