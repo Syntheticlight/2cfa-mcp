@@ -1,8 +1,8 @@
 package server
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -204,7 +204,6 @@ func TestSSERoutingTrailingSlashAndDirectAccept(t *testing.T) {
 	}
 }
 
-
 func TestOversizedMCPRequestRejected(t *testing.T) {
 	tmpDir := t.TempDir()
 	token := "body-limit-token"
@@ -229,5 +228,33 @@ func TestOversizedMCPRequestRejected(t *testing.T) {
 
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("expected %d for oversized body, got %d", http.StatusRequestEntityTooLarge, rec.Code)
+	}
+}
+
+func TestOversizedGateRequestRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	token := "gate-body-limit-token"
+	cfg := ServerConfig{
+		Port:          2232,
+		AuthToken:     token,
+		WorkspacePath: tmpDir,
+		ExecTimeout:   120 * time.Second,
+		Enable2FAGate: true,
+	}
+
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	body := bytes.NewReader(make([]byte, MaxRequestBodyBytes+1))
+	req := httptest.NewRequest(http.MethodPost, "/gate/api/unlock?token="+token, body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.httpSrv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected %d for oversized gate body, got %d", http.StatusRequestEntityTooLarge, rec.Code)
 	}
 }

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Syntheticlight/2cfa-mcp/internal/gate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/Syntheticlight/2cfa-mcp/internal/gate"
 )
 
 func TestFullConversational2FAWorkflow(t *testing.T) {
@@ -290,7 +290,6 @@ func TestSetup2FAWhenAlreadyEnabled(t *testing.T) {
 		t.Errorf("expected response to indicate 2FA is disabled, got: %s", unlockText)
 	}
 }
-
 
 func TestCappedBufferBoundedMemory(t *testing.T) {
 	buf := newCappedBuffer(8)

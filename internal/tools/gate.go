@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Syntheticlight/2cfa-mcp/internal/gate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/skip2/go-qrcode"
-	"github.com/Syntheticlight/2cfa-mcp/internal/gate"
 )
 
 // RegisterGateTools registers setup_2fa, unlock_gate, and lock_gate tools to MCP server.
@@ -139,9 +139,9 @@ OTP Auth URI:  %s
 
 	// 2. unlock_gate: Unlock with optional duration (0 = never expires)
 	unlockTool := mcp.NewTool("unlock_gate",
-		mcp.WithDescription("Unlock the 2FA security gate using a 6-digit Google Authenticator code. Generates a dynamic lease_token. Defaults to permanent (never expires) unless duration_minutes is specified."),
+		mcp.WithDescription("Unlock the 2FA security gate using a 6-digit Google Authenticator code. Generates a dynamic bearer lease_token. By default it has no time expiry and remains valid until explicit lock/revocation, 2FA rotation/disable, or server restart."),
 		mcp.WithString("code", mcp.Required(), mcp.Description("The 6-digit TOTP verification code from Google Authenticator")),
-		mcp.WithNumber("duration_minutes", mcp.Description("Optional validity period in minutes. Default 0 means permanent (never expires for this conversation).")),
+		mcp.WithNumber("duration_minutes", mcp.Description("Optional validity period in minutes. Default 0 means no time expiry; the lease is not cryptographically bound to a chat conversation.")),
 	)
 
 	s.AddTool(unlockTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -190,7 +190,7 @@ OTP Auth URI:  %s
 			Message:    fmt.Sprintf("Lease token issued (duration: %d mins)", durationMinutes),
 		})
 
-		durationText := "Permanent (Never expires for this conversation)"
+		durationText := "No time expiry (valid until lock/revocation, 2FA rotation/disable, or server restart)"
 		if durationMinutes > 0 {
 			durationText = fmt.Sprintf("Valid for %d minutes", durationMinutes)
 		}

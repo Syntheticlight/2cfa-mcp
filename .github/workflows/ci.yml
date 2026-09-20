@@ -23,6 +23,17 @@ jobs:
       - name: Validate shell scripts
         run: bash -n scripts/daemon.sh
 
+      - name: Gofmt
+        shell: bash
+        run: |
+          UNFORMATTED="$(gofmt -l .)"
+          if [ -n "$UNFORMATTED" ]; then
+            echo "The following Go files are not gofmt-formatted:"
+            echo "$UNFORMATTED"
+            gofmt -d $UNFORMATTED
+            exit 1
+          fi
+
       - name: Vet
         run: go vet ./...
 

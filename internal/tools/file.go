@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 	"github.com/Syntheticlight/2cfa-mcp/internal/gate"
 	"github.com/Syntheticlight/2cfa-mcp/internal/security"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 )
 
 const MaxReadFileBytes = 10 * 1024 * 1024 // 10 MB limit for single file read

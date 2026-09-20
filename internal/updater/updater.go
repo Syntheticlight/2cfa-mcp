@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	CurrentVersion = "v1.0.5"
+	CurrentVersion = "v1.0.6"
 	RepoOwner      = "Syntheticlight"
 	RepoName       = "2cfa-mcp"
 	GitHubAPIURL   = "https://api.github.com/repos/Syntheticlight/2cfa-mcp/releases/latest"
@@ -32,8 +32,8 @@ type UpdateInfo struct {
 }
 
 var (
-	mu          sync.RWMutex
-	cachedInfo  UpdateInfo = UpdateInfo{
+	mu         sync.RWMutex
+	cachedInfo UpdateInfo = UpdateInfo{
 		CurrentVersion: CurrentVersion,
 		LatestVersion:  CurrentVersion,
 		HasUpdate:      false,

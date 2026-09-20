@@ -140,7 +140,6 @@ func (h *Handler) handleLock(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "message": "Gate locked"})
 }
 
-
 func (h *Handler) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(dashboardHTML))
@@ -377,7 +376,7 @@ const dashboardHTML = `<!DOCTYPE html>
       <div class="brand">
         <svg height="22" viewBox="0 0 24 24" width="22" fill="#58a6ff"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
         <h1>2cfa-mcp 2FA Gate</h1>
-        <span>v1.0.5</span>
+        <span>v1.0.6</span>
       </div>
       <div id="statusBadge" class="status-pill locked">Checking...</div>
     </header>
@@ -404,8 +403,6 @@ const dashboardHTML = `<!DOCTYPE html>
       </div>
 
       <div class="actions-grid">
-        <input type="text" id="totpCode" class="input-code" placeholder="6-digit TOTP Code" maxlength="6" autocomplete="off" />
-        <button class="btn-primary" onclick="unlockGate()">Unlock with TOTP</button>
         <button class="btn-danger" onclick="lockGate()">Immediate Emergency Lock</button>
       </div>
       <div id="msgAlert"></div>
@@ -554,31 +551,6 @@ const dashboardHTML = `<!DOCTYPE html>
       alert.style.border = '1px solid ' + (isError ? '#da3633' : '#238636');
       alert.innerText = msg;
       setTimeout(() => { alert.style.display = 'none'; }, 4000);
-    }
-
-    async function unlockGate() {
-      const code = document.getElementById('totpCode').value.trim();
-      if (!code) {
-        showAlert("Please enter 6-digit TOTP code", true);
-        return;
-      }
-      try {
-        const res = await fetch('/gate/api/unlock?token=' + encodeURIComponent(token), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: code })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          showAlert(data.message || "Gate unlocked successfully!", false);
-          document.getElementById('totpCode').value = '';
-          fetchStatus();
-        } else {
-          showAlert(data.error || "Unlock failed", true);
-        }
-      } catch (e) {
-        showAlert("Network error: " + e.message, true);
-      }
     }
 
     async function lockGate() {

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Syntheticlight/2cfa-mcp/internal/auth"
 )
 
 // AuditEntry stores an individual execution audit record.
@@ -71,9 +73,9 @@ type Manager struct {
 	auditRing     []AuditEntry
 	maxAudits     int
 
-	totpAttempts  map[string]*totpAttemptState
+	totpAttempts   map[string]*totpAttemptState
 	globalFailures []time.Time
-	usedTOTPSteps map[string]time.Time
+	usedTOTPSteps  map[string]time.Time
 }
 
 // Config holds Gate Manager initialization options.
@@ -92,15 +94,15 @@ func NewManager(cfg Config) *Manager {
 		}
 	}
 	return &Manager{
-		enabled:    cfg.Enabled,
-		totpSecret: cfg.TOTPSecret,
-		envPath:    envPath,
+		enabled:        cfg.Enabled,
+		totpSecret:     cfg.TOTPSecret,
+		envPath:        envPath,
 		leases:         make(map[string]*Lease),
-		maxAudits:       20,
-		auditRing:       make([]AuditEntry, 0, 20),
-		totpAttempts:    make(map[string]*totpAttemptState),
-		usedTOTPSteps:   make(map[string]time.Time),
-		globalFailures:  make([]time.Time, 0, totpGlobalFailureLimit),
+		maxAudits:      20,
+		auditRing:      make([]AuditEntry, 0, 20),
+		totpAttempts:   make(map[string]*totpAttemptState),
+		usedTOTPSteps:  make(map[string]time.Time),
+		globalFailures: make([]time.Time, 0, totpGlobalFailureLimit),
 	}
 }
 
@@ -453,7 +455,7 @@ func (m *Manager) AuthorizeManagement(leaseToken, currentCode, clientKey string)
 }
 
 // CreateLease verifies the TOTP code and mints a dynamic lease token.
-// durationMinutes == 0 means permanent (never expires).
+// durationMinutes == 0 means no time expiry; explicit lock/revocation, 2FA rotation/disable, or process restart still invalidates the lease.
 func (m *Manager) CreateLease(code string, durationMinutes int, clientIP, country string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -613,6 +615,14 @@ func (m *Manager) GetAudits() []AuditEntry {
 
 // ResolveClientIP parses real client IP and country from request headers.
 func ResolveClientIP(r *http.Request) (string, string) {
+	if canonicalIP := strings.TrimSpace(r.Header.Get(auth.CanonicalClientIPHeader)); canonicalIP != "" {
+		country := strings.TrimSpace(r.Header.Get(auth.CanonicalClientCountryHeader))
+		if country == "" {
+			country = "LOCAL"
+		}
+		return canonicalIP, country
+	}
+
 	country := r.Header.Get("CF-IPCountry")
 	if country == "" {
 		country = "LOCAL"

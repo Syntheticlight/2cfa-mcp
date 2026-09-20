@@ -41,7 +41,7 @@
 | 模式 | 配置与状态 | 权限与体验 | 适用人群/场景 |
 | :--- | :--- | :--- | :--- |
 | **1. Token 直连模式（默认）** | 不配置/不开启 2FA，仅设 `AUTH_TOKEN` | **只要 Token 对，就拥有全部权限！** 所有命令和读写工具秒级直通运行，零拦截、零弹窗、零打扰。 | **本地用户 / 局域网用户 / 个人极简自用** |
-| **2. 对话 2FA 会话模式** | 对话中开启 2FA，报一次 6 位动态码 | **报一次码，本场对话一直有全部权限！** 签发的隐式通行证（`lease_token`）默认不过期，AI 在后台静默携带，界面无乱码，网络重连不掉线。 | **公网暴露（如 CF 穿透）但自己长期使用** |
+| **2. 对话 2FA 会话模式** | 对话中开启 2FA，报一次 6 位动态码 | **报一次码即可获得隐式通行证！** 默认无时间过期，网络重连不掉线；直到显式锁门/撤销、2FA 更换或服务重启才失效。它是 bearer lease，并非与某个聊天线程密码学绑定。 | **公网暴露（如 CF 穿透）但自己长期使用** |
 | **3. 对话 2FA 限时模式** | 对话中指定开闸时间（如“*帮我开门 30 分钟*”） | **时效内带隐式通行证有全部权限，超时自动锁死！** 超过设定时间后自动撤销凭证，需重新报验证码解锁。 | **临时借给他人使用 / 在不可信公共设备上操作** |
 
 ---
@@ -118,6 +118,8 @@ TOTP_SECRET=
   ```
 
 ### 3. 启动守护进程与 Cloudflare 隧道
+> ⚠️ **升级说明**：如果你是从 `v1.0.4` 或更早版本升级，建议先执行 `git pull`（或重新克隆仓库）再运行 `./scripts/daemon.sh update`。旧版 `daemon.sh` 只会替换二进制，不会自动更新自身，因此拿不到 v1.0.5+ 新增的 argv 脱敏、日志轮转和 SHA-256 校验逻辑。
+
 项目自带高可用 Supervisor 脚本，支持进程自愈重启与 Termux 唤醒锁防休眠：
 ```bash
 chmod +x scripts/daemon.sh
@@ -284,7 +286,7 @@ https://<你的穿透域名>/gate?token=<你的AUTH_TOKEN>
 | Mode | Configuration | Access & Experience | Best For |
 | :--- | :--- | :--- | :--- |
 | **1. Direct Token Mode (Default)** | No 2FA configured; only `AUTH_TOKEN` is set. | **Valid Token = 100% Full Access!** All shell commands and file tools run directly with zero popups or hurdles. | **Local users / Home LAN / Personal use** |
-| **2. Conversational 2FA Mode** | Enable 2FA in chat and provide a 6-digit TOTP code once. | **Unlock once, full access for the entire conversation!** Issued implicit lease token never expires during the session. AI carries it silently in background JSON. | **Exposed to public via Cloudflare Tunnel** |
+| **2. Conversational 2FA Mode** | Enable 2FA in chat and provide a 6-digit TOTP code once. | **Unlock once to receive an implicit bearer lease.** By default it has no time expiry and survives reconnects, but it is invalidated by explicit lock/revocation, 2FA rotation/disable, or server restart; it is not cryptographically bound to one chat thread. | **Exposed to public via Cloudflare Tunnel** |
 | **3. Timed 2FA Mode** | Specify duration during unlock (e.g., *"Open gate for 30 minutes"*). | **Full access within time window; auto-locks when expired.** Re-verification required after time runs out. | **Lending to others / Public untrusted devices** |
 
 ## Quick Start in 3 Minutes
@@ -308,7 +310,7 @@ chmod +x scripts/daemon.sh
 2. Click **Add MCP Server**:
    - **Type**: `SSE`
    - **URL**: `https://<YOUR-TUNNEL-DOMAIN>/mcp/<YOUR_AUTH_TOKEN>/sse`
-3. Click **Save & Connect**. All 8 remote tools will be available immediately!
+3. Click **Save & Connect**. All 10 remote tools will be available immediately!
 
 ---
 

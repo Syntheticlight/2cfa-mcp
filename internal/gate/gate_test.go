@@ -218,7 +218,6 @@ func TestPersistEnvPreservesAuthToken(t *testing.T) {
 	}
 }
 
-
 func TestTOTPReplayProtection(t *testing.T) {
 	secret := "JBSWY3DPEHPK3PXP"
 	mgr := NewManager(Config{Enabled: true, TOTPSecret: secret})
