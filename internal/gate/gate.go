@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -235,7 +236,6 @@ func (m *Manager) Configure2FA(secret string, enable bool) (string, error) {
 			}
 			activeSecret = sec
 		}
-		m.totpSecret = activeSecret
 	}
 
 	if m.envPath != "" {
@@ -503,9 +503,14 @@ func (m *Manager) CheckAccess() (bool, string) {
 // RecordActivity placeholder for backward compatibility.
 func (m *Manager) RecordActivity() {}
 
-// Unlock mints a lease for web UI or backward-compatible callers and returns the token.
+// Unlock mints a lease for backward-compatible callers.
 func (m *Manager) Unlock(code string) (string, error) {
 	return m.CreateLease(code, 0, "web_ui", "LOCAL")
+}
+
+// UnlockForClient preserves the real client identity for rate limiting and audit.
+func (m *Manager) UnlockForClient(code, clientIP, country string) (string, error) {
+	return m.CreateLease(code, 0, clientIP, country)
 }
 
 // RevokeLease removes a specific lease token.
@@ -638,6 +643,8 @@ func generateSecureToken(prefix string) (string, error) {
 }
 
 // PersistEnv writes or updates key-value pairs in a .env file.
+// The replacement is atomic and process environment variables are updated only
+// after the durable file replacement succeeds.
 func PersistEnv(filePath string, updates map[string]string) error {
 	if filePath == "" || len(updates) == 0 {
 		return nil
@@ -661,23 +668,23 @@ func PersistEnv(filePath string, updates map[string]string) error {
 			if newVal, ok := updates[key]; ok {
 				lines = append(lines, fmt.Sprintf("%s=%s", key, newVal))
 				foundKeys[key] = true
-				_ = os.Setenv(key, newVal)
 			} else {
 				lines = append(lines, rawLine)
 				foundKeys[key] = true
 			}
 		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read env file: %w", err)
 	}
 
 	for key, val := range updates {
 		if !foundKeys[key] {
 			lines = append(lines, fmt.Sprintf("%s=%s", key, val))
 			foundKeys[key] = true
-			_ = os.Setenv(key, val)
 		}
 	}
 
-	// Safety: if AUTH_TOKEN is not in .env but is present in current environment, preserve it!
+	// Safety: if AUTH_TOKEN is not in .env but is present in current environment, preserve it.
 	if !foundKeys["AUTH_TOKEN"] {
 		if tok := os.Getenv("AUTH_TOKEN"); tok != "" {
 			lines = append([]string{fmt.Sprintf("AUTH_TOKEN=%s", tok)}, lines...)
@@ -689,5 +696,40 @@ func PersistEnv(filePath string, updates map[string]string) error {
 		outContent += "\n"
 	}
 
-	return os.WriteFile(filePath, []byte(outContent), 0600)
+	dir := filepath.Dir(filePath)
+	base := filepath.Base(filePath)
+	tmp, err := os.CreateTemp(dir, "."+base+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary env file: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}
+	defer cleanup()
+
+	if err := tmp.Chmod(0600); err != nil {
+		return fmt.Errorf("failed to secure temporary env file: %w", err)
+	}
+	if _, err := tmp.WriteString(outContent); err != nil {
+		return fmt.Errorf("failed to write temporary env file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temporary env file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close temporary env file: %w", err)
+	}
+	if err := os.Rename(tmpName, filePath); err != nil {
+		return fmt.Errorf("failed to atomically replace env file: %w", err)
+	}
+
+	for key, val := range updates {
+		if err := os.Setenv(key, val); err != nil {
+			return fmt.Errorf("env file persisted but failed to update process environment for %s: %w", key, err)
+		}
+	}
+
+	return nil
 }
