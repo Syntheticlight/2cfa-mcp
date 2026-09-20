@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Syntheticlight/2cfa-mcp/internal/gate"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/skip2/go-qrcode"
-	"github.com/Syntheticlight/2cfa-mcp/internal/gate"
 )
 
 // RegisterGateTools registers setup_2fa, unlock_gate, and lock_gate tools to MCP server.
