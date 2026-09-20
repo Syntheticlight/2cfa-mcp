@@ -56,7 +56,7 @@ func TestGateDefaultAndLeaseLifecycle(t *testing.T) {
 	}
 
 	// 5. Test timed lease expiration
-	code, _ = GenerateCurrentTOTP(secret, time.Now())
+	code, _ = GenerateCurrentTOTP(secret, time.Now().Add(30*time.Second))
 	timedToken, err := mgr.CreateLease(code, 1, "127.0.0.1", "LOCAL") // 1 minute
 	if err != nil {
 		t.Fatalf("failed to create timed lease: %v", err)
@@ -215,5 +215,62 @@ func TestPersistEnvPreservesAuthToken(t *testing.T) {
 	content := string(data)
 	if !strings.Contains(content, "AUTH_TOKEN=test-token-preserved-1234") {
 		t.Errorf("expected .env to preserve AUTH_TOKEN, got: %s", content)
+	}
+}
+
+
+func TestTOTPReplayProtection(t *testing.T) {
+	secret := "JBSWY3DPEHPK3PXP"
+	mgr := NewManager(Config{Enabled: true, TOTPSecret: secret})
+
+	code, err := GenerateCurrentTOTP(secret, time.Now())
+	if err != nil {
+		t.Fatalf("failed to generate TOTP: %v", err)
+	}
+
+	if _, err := mgr.CreateLease(code, 0, "198.51.100.10", "TEST"); err != nil {
+		t.Fatalf("first use of TOTP should succeed: %v", err)
+	}
+	if _, err := mgr.CreateLease(code, 0, "198.51.100.10", "TEST"); err == nil || !strings.Contains(err.Error(), "already been used") {
+		t.Fatalf("expected replayed TOTP to be rejected, got: %v", err)
+	}
+}
+
+func TestTOTPRateLimit(t *testing.T) {
+	secret := "JBSWY3DPEHPK3PXP"
+	mgr := NewManager(Config{Enabled: true, TOTPSecret: secret})
+	client := "203.0.113.20"
+
+	for i := 0; i < totpClientFailureLimit; i++ {
+		_, _ = mgr.CreateLease("000000", 0, client, "TEST")
+	}
+
+	validCode, err := GenerateCurrentTOTP(secret, time.Now())
+	if err != nil {
+		t.Fatalf("failed to generate TOTP: %v", err)
+	}
+	if _, err := mgr.CreateLease(validCode, 0, client, "TEST"); err == nil || !strings.Contains(err.Error(), "too many failed") {
+		t.Fatalf("expected rate limit after repeated failures, got: %v", err)
+	}
+}
+
+func TestConfigure2FAPersistFailureDoesNotChangeRuntimeState(t *testing.T) {
+	tmpDir := t.TempDir()
+	missingDirEnv := filepath.Join(tmpDir, "missing", ".env")
+	secret := "JBSWY3DPEHPK3PXP"
+
+	mgr := NewManager(Config{
+		Enabled: false,
+		EnvPath: missingDirEnv,
+	})
+
+	if _, err := mgr.Configure2FA(secret, true); err == nil {
+		t.Fatal("expected persistence failure")
+	}
+	if mgr.IsEnabled() {
+		t.Fatal("2FA runtime state must remain disabled when persistence fails")
+	}
+	if mgr.GetSecret() != "" {
+		t.Fatal("TOTP secret must not be committed to runtime state when persistence fails")
 	}
 }

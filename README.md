@@ -55,16 +55,20 @@
 
 | 工具名称 | 主要功能 | 常用参数 |
 | :--- | :--- | :--- |
-| `execute_command` | 执行 Shell 命令（支持自定义长耗时任务与内存防爆保护） | `command` (命令), `work_dir` (可选目录), `timeout_seconds` (可选超时秒数) |
+| `execute_command` | 执行 Shell 命令（支持自定义长耗时任务与运行时有界输出捕获） | `command` (命令), `work_dir` (可选目录), `timeout_seconds` (可选超时秒数) |
 | `read_file` | 读取工作区内指定文件（强制防路径穿越保护） | `path` (文件相对路径) |
 | `write_file` | 写入或覆盖工作区文件（自动递归创建父级目录） | `path` (文件相对路径), `content` (写入内容) |
 | `list_dir` | 结构化列出指定目录下的文件与文件夹 | `path` (可选目录路径，留空为根目录) |
 | `system_status` | 实时查看 CPU 核心、内存占用、运行时间及版本更新状态 | 无需任何参数 |
 | `check_update` | 检查 GitHub 是否有新版本发布与更新日志 | `force` (可选是否强制跳过缓存) |
 
+> ⚠️ **Shell 权限边界**：`work_dir` 只限制命令的**起始工作目录**。由于 `execute_command` 提供的是完整 Shell，它会继承 2cfa-mcp 进程本身的系统权限，并不是 chroot/bwrap 级文件系统沙箱。真正需要只读/只写 workspace 时，请优先使用 `read_file` / `write_file` / `list_dir`，这些工具会执行路径穿越与符号链接逃逸检查。
+
 ### 2. 可选 2FA 安全门禁工具（仅当你主动开启 2FA 时才需要）
 
 *如果你只是本地使用或局域网使用，以下 3 个工具完全可以忽略，平时不需要使用它们：*
+
+> 🔐 一旦 2FA 已启用，**仅凭 AUTH_TOKEN 不能关闭或重置 2FA**。关闭/重新配置必须额外提供有效 `lease_token` 或当前 TOTP 验证码。同一 TOTP 时间步只能成功使用一次，并对连续失败尝试进行限速。
 
 | 工具名称 | 主要功能 | 触发时机 |
 | :--- | :--- | :--- |
@@ -246,6 +250,7 @@ https://xxx-xxx-xxx.trycloudflare.com
   -> ChatGPT 自动调用 `unlock_gate(code="...", duration_minutes=15)`，到期后门禁自动锁死。
 - **物理断电关门**：“*把门锁上*”  
   -> ChatGPT 自动调用 `lock_gate()`，即刻撤销所有租约，断电物理上锁。
+- **关闭/重置 2FA**：启用 2FA 后属于安全管理操作，必须携带当前有效 `lease_token`，或额外验证当前 TOTP；单独持有 `AUTH_TOKEN` 无法关闭或替换第二因素。
 
 ---
 

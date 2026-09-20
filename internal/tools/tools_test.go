@@ -84,8 +84,9 @@ func TestFullConversational2FAWorkflow(t *testing.T) {
 		t.Errorf("expected command to be blocked once 2FA is enabled")
 	}
 
-	// Phase C: Unlock via unlock_gate (default duration = 0, permanent for conversation)
-	validCode, err := generateTestTOTP(secret)
+	// Phase C: Unlock via unlock_gate with a fresh adjacent-step code.
+	// The setup confirmation code itself is single-use by design.
+	validCode, err := gate.GenerateCurrentTOTP(secret, time.Now().Add(30*time.Second))
 	if err != nil {
 		t.Fatalf("failed to generate totp: %v", err)
 	}
@@ -123,6 +124,15 @@ func TestFullConversational2FAWorkflow(t *testing.T) {
 		t.Errorf("unexpected output: %+v", resWithLease)
 	}
 
+	// Security-sensitive 2FA management must not accept AUTH_TOKEN alone.
+	unauthorizedDisable := mcp.CallToolRequest{}
+	unauthorizedDisable.Params.Name = "setup_2fa"
+	unauthorizedDisable.Params.Arguments = map[string]any{"enable": false}
+	unauthorizedDisableRes, _ := setupTool.Handler(context.Background(), unauthorizedDisable)
+	if !unauthorizedDisableRes.IsError {
+		t.Errorf("expected disabling 2FA without lease/current code to be rejected")
+	}
+
 	// Phase E: Lock gate via lock_gate -> BLOCKED again
 	lockReq := mcp.CallToolRequest{}
 	lockReq.Params.Name = "lock_gate"
@@ -135,13 +145,22 @@ func TestFullConversational2FAWorkflow(t *testing.T) {
 		t.Errorf("expected command to be blocked after lock_gate")
 	}
 
-	// Phase F: Disable 2FA via setup_2fa -> back to direct connect
+	// Phase F: Disable 2FA with a fresh current factor -> back to direct connect.
+	// Previous-step code is still inside the accepted drift window and has not been used.
+	disableCode, err := gate.GenerateCurrentTOTP(secret, time.Now().Add(-30*time.Second))
+	if err != nil {
+		t.Fatalf("failed to generate disable TOTP: %v", err)
+	}
 	setupReqDisable := mcp.CallToolRequest{}
 	setupReqDisable.Params.Name = "setup_2fa"
 	setupReqDisable.Params.Arguments = map[string]any{
-		"enable": false,
+		"enable":       false,
+		"current_code": disableCode,
 	}
-	_, _ = setupTool.Handler(context.Background(), setupReqDisable)
+	disableRes, _ := setupTool.Handler(context.Background(), setupReqDisable)
+	if disableRes.IsError {
+		t.Fatalf("expected disabling 2FA with current factor to succeed: %+v", disableRes)
+	}
 
 	resDisabled, _ := cmdTool.Handler(context.Background(), req)
 	if resDisabled.IsError {
@@ -269,5 +288,23 @@ func TestSetup2FAWhenAlreadyEnabled(t *testing.T) {
 	unlockText := unlockRes.Content[0].(mcp.TextContent).Text
 	if !strings.Contains(unlockText, "currently DISABLED") {
 		t.Errorf("expected response to indicate 2FA is disabled, got: %s", unlockText)
+	}
+}
+
+
+func TestCappedBufferBoundedMemory(t *testing.T) {
+	buf := newCappedBuffer(8)
+	n, err := buf.Write([]byte("123456789012345"))
+	if err != nil {
+		t.Fatalf("unexpected write error: %v", err)
+	}
+	if n != 15 {
+		t.Fatalf("writer must report full child-process write length, got %d", n)
+	}
+	if got := buf.String(); got != "12345678" {
+		t.Fatalf("expected only capped bytes to be retained, got %q", got)
+	}
+	if !buf.Truncated() {
+		t.Fatal("expected buffer to report truncation")
 	}
 }

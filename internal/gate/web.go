@@ -88,7 +88,7 @@ func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 
 	ip, country := ResolveClientIP(r)
 
-	leaseToken, err := h.manager.Unlock(req.Code)
+	leaseToken, err := h.manager.UnlockForClient(req.Code, ip, country)
 	if err != nil {
 		h.manager.AddAudit(AuditEntry{
 			ClientIP: ip,

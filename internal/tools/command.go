@@ -29,7 +29,7 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 	}
 
 	tool := mcp.NewTool("execute_command",
-		mcp.WithDescription("Execute shell command within workspace with strict timeout and output limits"),
+		mcp.WithDescription("Execute a shell command starting in the workspace with strict timeout and bounded captured output. The shell inherits the server process OS permissions and is not a filesystem sandbox."),
 		mcp.WithString("command", mcp.Required(), mcp.Description("The shell command to execute")),
 		mcp.WithString("work_dir", mcp.Description("Optional sub-directory relative to workspace root")),
 		mcp.WithNumber("timeout_seconds", mcp.Description("Optional execution timeout in seconds (e.g. 600 or 1800 for long tasks/downloads). Set -1 for unlimited")),
@@ -98,20 +98,20 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 
 		cmd.Dir = execDir
 
-		var stdoutBuf, stderrBuf bytes.Buffer
-		cmd.Stdout = &stdoutBuf
-		cmd.Stderr = &stderrBuf
+		stdoutBuf := newCappedBuffer(MaxOutputBytes)
+		stderrBuf := newCappedBuffer(MaxOutputBytes)
+		cmd.Stdout = stdoutBuf
+		cmd.Stderr = stderrBuf
 
 		cmdErr := cmd.Run()
 
 		stdoutStr := stdoutBuf.String()
 		stderrStr := stderrBuf.String()
-
-		if len(stdoutStr) > MaxOutputBytes {
-			stdoutStr = stdoutStr[:MaxOutputBytes] + "\n... [stdout truncated due to 4MB limit. Tip: redirect large output to file with > file.log]"
+		if stdoutBuf.Truncated() {
+			stdoutStr += "\n... [stdout truncated at 4MB while command was running. Tip: redirect large output to file with > file.log]"
 		}
-		if len(stderrStr) > MaxOutputBytes {
-			stderrStr = stderrStr[:MaxOutputBytes] + "\n... [stderr truncated due to 4MB limit]"
+		if stderrBuf.Truncated() {
+			stderrStr += "\n... [stderr truncated at 4MB while command was running]"
 		}
 
 		output := fmt.Sprintf("=== STDOUT ===\n%s\n=== STDERR ===\n%s", stdoutStr, stderrStr)
@@ -155,6 +155,50 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 
 		return mcp.NewToolResultText(output), nil
 	})
+}
+
+type cappedBuffer struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func newCappedBuffer(limit int) *cappedBuffer {
+	return &cappedBuffer{limit: limit}
+}
+
+// Write implements io.Writer while retaining at most limit bytes. It reports
+// the full input length as consumed so child processes never block because the
+// capture buffer reached its memory ceiling.
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	originalLen := len(p)
+	if b.limit <= 0 {
+		b.truncated = b.truncated || originalLen > 0
+		return originalLen, nil
+	}
+
+	remaining := b.limit - b.buf.Len()
+	if remaining > 0 {
+		n := originalLen
+		if n > remaining {
+			n = remaining
+		}
+		if _, err := b.buf.Write(p[:n]); err != nil {
+			return 0, err
+		}
+	}
+	if originalLen > remaining {
+		b.truncated = true
+	}
+	return originalLen, nil
+}
+
+func (b *cappedBuffer) String() string {
+	return b.buf.String()
+}
+
+func (b *cappedBuffer) Truncated() bool {
+	return b.truncated
 }
 
 func truncateStr(s string, maxLen int) string {

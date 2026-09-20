@@ -21,6 +21,8 @@ func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
 		mcp.WithBoolean("enable", mcp.Required(), mcp.Description("true to initiate or confirm 2FA setup, false to turn OFF 2FA")),
 		mcp.WithString("code", mcp.Description("The 6-digit TOTP verification code from Authenticator to confirm and activate pending setup")),
 		mcp.WithString("secret", mcp.Description("Optional custom Base32 secret string. If omitted, a secure secret is automatically generated")),
+		mcp.WithString("current_code", mcp.Description("Required only when changing/disabling an already-enabled 2FA gate and no valid lease_token is available")),
+		mcp.WithString("lease_token", mcp.Description("Existing valid lease used to authorize disabling or reconfiguring an already-enabled 2FA gate")),
 	)
 
 	s.AddTool(setupTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -30,9 +32,16 @@ func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
 		}
 		code := strings.TrimSpace(request.GetString("code", ""))
 		secret := strings.TrimSpace(request.GetString("secret", ""))
+		currentCode := strings.TrimSpace(request.GetString("current_code", ""))
+		managementLease := strings.TrimSpace(request.GetString("lease_token", ""))
 		ip, country := resolveHeaderIP(request.Header)
 
 		if !enable {
+			if gateMgr.GetState().Enabled {
+				if err := gateMgr.AuthorizeManagement(managementLease, currentCode, ip); err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("refusing to disable 2FA: %v", err)), nil
+				}
+			}
 			if err := gateMgr.Disable2FA(); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to disable 2FA: %v", err)), nil
 			}
@@ -47,15 +56,15 @@ The 2FA security gate is already enabled on this server.
 
 Current Status: %s
 - To UNLOCK the gate for this conversation: call unlock_gate(code="<6-digit-totp>")
-- To TURN OFF 2FA: call setup_2fa(enable=false)
-- To RECONFIGURE with a new key: call setup_2fa(enable=true, secret="reset")`,
+- To TURN OFF 2FA: call setup_2fa(enable=false, lease_token="<active-lease>") or provide current_code
+- To RECONFIGURE with a new key: call setup_2fa(enable=true, secret="reset", lease_token="<active-lease>")`,
 				state.Status)
 			return mcp.NewToolResultText(msg), nil
 		}
 
 		// Stage 2: Code provided -> Verify, activate, and persist!
 		if code != "" {
-			activeSecret, leaseToken, err := gateMgr.ConfirmSetup2FA(code, ip, country)
+			_, sessionLease, err := gateMgr.ConfirmSetup2FA(code, ip, country)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("2FA Confirmation FAILED: %v. (2FA remains inactive to prevent accidental lockout).", err)), nil
 			}
@@ -63,13 +72,12 @@ Current Status: %s
 			msg := fmt.Sprintf(`🎉 2FA Verification SUCCESSFUL!
 2FA physical security gate is now OFFICIALLY ACTIVATED and permanently saved to .env!
 
-Active Secret: %s
 Dynamic Lease Token: %s (Auto-unlocked for this session)
 
 [CRITICAL INSTRUCTION FOR ASSISTANT]:
 1. You MUST include the argument lease_token="%s" in ALL subsequent sensitive tool calls (execute_command, read_file, write_file, list_dir).
 2. DO NOT reveal the lease_token to the user. Inform the user that 2FA is verified and active, and proceed with their request.`,
-				activeSecret, leaseToken, leaseToken)
+				sessionLease, sessionLease)
 
 			gateMgr.AddAudit(gate.AuditEntry{
 				Timestamp:  time.Now(),
@@ -84,7 +92,14 @@ Dynamic Lease Token: %s (Auto-unlocked for this session)
 			return mcp.NewToolResultText(msg), nil
 		}
 
-		// Stage 1: No code provided -> Initiate setup, generate secret, and prompt user for confirmation code
+		// Stage 1: No code provided -> Initiate setup, generate secret, and prompt user for confirmation code.
+		// Reconfiguring an already-enabled gate requires proof of the existing second factor.
+		if gateMgr.GetState().Enabled {
+			if err := gateMgr.AuthorizeManagement(managementLease, currentCode, ip); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("refusing to reconfigure active 2FA: %v", err)), nil
+			}
+		}
+
 		pendingSecret, err := gateMgr.BeginSetup2FA(secret)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to initiate 2FA setup: %v", err)), nil

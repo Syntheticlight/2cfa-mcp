@@ -2,12 +2,14 @@ package gate
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +46,19 @@ type StateInfo struct {
 	Unlocked          bool   `json:"unlocked"`
 }
 
+const (
+	pendingSetupTTL        = 15 * time.Minute
+	totpFailureWindow      = 5 * time.Minute
+	totpClientFailureLimit = 5
+	totpGlobalFailureLimit = 25
+	totpUsedRetention      = 3 * time.Minute
+)
+
+type totpAttemptState struct {
+	Failures     []time.Time
+	BlockedUntil time.Time
+}
+
 // Manager manages the 2FA lifecycle, leases, and audit logs.
 type Manager struct {
 	mu            sync.RWMutex
@@ -55,6 +70,10 @@ type Manager struct {
 	leases        map[string]*Lease
 	auditRing     []AuditEntry
 	maxAudits     int
+
+	totpAttempts  map[string]*totpAttemptState
+	globalFailures []time.Time
+	usedTOTPSteps map[string]time.Time
 }
 
 // Config holds Gate Manager initialization options.
@@ -76,9 +95,12 @@ func NewManager(cfg Config) *Manager {
 		enabled:    cfg.Enabled,
 		totpSecret: cfg.TOTPSecret,
 		envPath:    envPath,
-		leases:     make(map[string]*Lease),
-		maxAudits:  20,
-		auditRing:  make([]AuditEntry, 0, 20),
+		leases:         make(map[string]*Lease),
+		maxAudits:       20,
+		auditRing:       make([]AuditEntry, 0, 20),
+		totpAttempts:    make(map[string]*totpAttemptState),
+		usedTOTPSteps:   make(map[string]time.Time),
+		globalFailures:  make([]time.Time, 0, totpGlobalFailureLimit),
 	}
 }
 
@@ -128,8 +150,13 @@ func (m *Manager) ConfirmSetup2FA(code, clientIP, country string) (string, strin
 	if m.pendingSecret == "" {
 		return "", "", errors.New("no pending 2FA setup in progress. Please call setup_2fa without code first to generate a secret")
 	}
+	if m.pendingAt.IsZero() || time.Since(m.pendingAt) > pendingSetupTTL {
+		m.pendingSecret = ""
+		m.pendingAt = time.Time{}
+		return "", "", errors.New("pending 2FA setup expired; start setup again")
+	}
 
-	valid, err := ValidateTOTP(m.pendingSecret, code, time.Now())
+	valid, err := m.validateAndConsumeTOTPLocked(m.pendingSecret, code, clientIP)
 	if err != nil {
 		return "", "", fmt.Errorf("verification error: %w", err)
 	}
@@ -137,22 +164,35 @@ func (m *Manager) ConfirmSetup2FA(code, clientIP, country string) (string, strin
 		return "", "", errors.New("invalid verification code. Please make sure the key was added correctly to your authenticator app and try again")
 	}
 
-	// Verification succeeded! Officially activate 2FA and persist
-	m.totpSecret = m.pendingSecret
-	m.pendingSecret = ""
-	m.enabled = true
+	newSecret := m.pendingSecret
+	token, err := generateSecureToken("lease_")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to mint lease token: %w", err)
+	}
 
+	// Persist first. Security state must not claim success if the durable
+	// configuration could not be written.
 	if m.envPath != "" {
 		updates := map[string]string{
 			"ENABLE_2FA_GATE": "true",
-			"TOTP_SECRET":     m.totpSecret,
+			"TOTP_SECRET":     newSecret,
 		}
-		_ = PersistEnv(m.envPath, updates)
+		if err := PersistEnv(m.envPath, updates); err != nil {
+			return "", "", fmt.Errorf("failed to persist 2FA configuration: %w", err)
+		}
 	}
 
-	// Issue first dynamic lease token so the user is immediately unlocked for this session
+	// Verification and persistence succeeded: activate 2FA and issue the
+	// first dynamic lease token so the current session remains usable.
+	m.totpSecret = newSecret
+	m.pendingSecret = ""
+	m.pendingAt = time.Time{}
+	m.enabled = true
+	// Rotating the second factor revokes every lease minted under the previous
+	// configuration. Only the newly-issued session lease survives.
+	m.leases = make(map[string]*Lease)
+
 	now := time.Now()
-	token := generateSecureToken("lease_")
 	m.leases[token] = &Lease{
 		Token:           token,
 		CreatedAt:       now,
@@ -170,16 +210,20 @@ func (m *Manager) Disable2FA() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.enabled = false
-	m.pendingSecret = ""
-	m.leases = make(map[string]*Lease)
-
+	// Persist first so a disk/permission failure cannot create a fail-open
+	// mismatch where RAM says 2FA is disabled but restart behavior differs.
 	if m.envPath != "" {
 		updates := map[string]string{
 			"ENABLE_2FA_GATE": "false",
 		}
-		_ = PersistEnv(m.envPath, updates)
+		if err := PersistEnv(m.envPath, updates); err != nil {
+			return fmt.Errorf("failed to persist disabled 2FA state: %w", err)
+		}
 	}
+
+	m.enabled = false
+	m.pendingSecret = ""
+	m.leases = make(map[string]*Lease)
 	return nil
 }
 
@@ -202,22 +246,24 @@ func (m *Manager) Configure2FA(secret string, enable bool) (string, error) {
 			}
 			activeSecret = sec
 		}
-		m.totpSecret = activeSecret
-	}
-
-	m.enabled = enable
-	if !enable {
-		m.leases = make(map[string]*Lease)
 	}
 
 	if m.envPath != "" {
 		updates := map[string]string{
 			"ENABLE_2FA_GATE": fmt.Sprintf("%t", enable),
 		}
-		if enable && m.totpSecret != "" {
-			updates["TOTP_SECRET"] = m.totpSecret
+		if enable && activeSecret != "" {
+			updates["TOTP_SECRET"] = activeSecret
 		}
-		_ = PersistEnv(m.envPath, updates)
+		if err := PersistEnv(m.envPath, updates); err != nil {
+			return "", fmt.Errorf("failed to persist 2FA configuration: %w", err)
+		}
+	}
+
+	m.totpSecret = activeSecret
+	m.enabled = enable
+	if !enable {
+		m.leases = make(map[string]*Lease)
 	}
 
 	return m.totpSecret, nil
@@ -251,6 +297,161 @@ func (m *Manager) IsEnabled() bool {
 	return m.enabled
 }
 
+func (m *Manager) pruneFailuresLocked(now time.Time) {
+	cutoff := now.Add(-totpFailureWindow)
+
+	filterTimes := func(in []time.Time) []time.Time {
+		out := in[:0]
+		for _, ts := range in {
+			if ts.After(cutoff) {
+				out = append(out, ts)
+			}
+		}
+		return out
+	}
+
+	m.globalFailures = filterTimes(m.globalFailures)
+	for key, state := range m.totpAttempts {
+		state.Failures = filterTimes(state.Failures)
+		if !state.BlockedUntil.IsZero() && now.After(state.BlockedUntil) {
+			state.BlockedUntil = time.Time{}
+		}
+		if len(state.Failures) == 0 && state.BlockedUntil.IsZero() {
+			delete(m.totpAttempts, key)
+		}
+	}
+}
+
+func (m *Manager) checkTOTPRateLimitLocked(clientKey string, now time.Time) error {
+	m.pruneFailuresLocked(now)
+
+	if len(m.globalFailures) >= totpGlobalFailureLimit {
+		return errors.New("too many failed 2FA attempts; please wait a few minutes before trying again")
+	}
+
+	if state := m.totpAttempts[clientKey]; state != nil && now.Before(state.BlockedUntil) {
+		return errors.New("too many failed 2FA attempts from this client; please wait before trying again")
+	}
+
+	return nil
+}
+
+func (m *Manager) recordTOTPFailureLocked(clientKey string, now time.Time) {
+	state := m.totpAttempts[clientKey]
+	if state == nil {
+		state = &totpAttemptState{}
+		m.totpAttempts[clientKey] = state
+	}
+
+	state.Failures = append(state.Failures, now)
+	m.globalFailures = append(m.globalFailures, now)
+
+	if len(state.Failures) >= totpClientFailureLimit {
+		state.BlockedUntil = now.Add(totpFailureWindow)
+	}
+}
+
+func (m *Manager) clearClientTOTPFailuresLocked(clientKey string) {
+	delete(m.totpAttempts, clientKey)
+}
+
+func totpReplayKey(secret string, step int64) string {
+	sum := sha256.Sum256([]byte(secret))
+	return fmt.Sprintf("%x:%d", sum[:], step)
+}
+
+func (m *Manager) purgeUsedTOTPStepsLocked(now time.Time) {
+	cutoff := now.Add(-totpUsedRetention)
+	for key, usedAt := range m.usedTOTPSteps {
+		if usedAt.Before(cutoff) {
+			delete(m.usedTOTPSteps, key)
+		}
+	}
+}
+
+// validateAndConsumeTOTPLocked validates a TOTP, rate-limits failures and marks
+// a successful RFC 6238 time-step as consumed so the same code cannot mint
+// multiple leases. Caller must hold m.mu for writing.
+func (m *Manager) validateAndConsumeTOTPLocked(secret, code, clientKey string) (bool, error) {
+	if clientKey == "" {
+		clientKey = "unknown"
+	}
+
+	now := time.Now()
+	if err := m.checkTOTPRateLimitLocked(clientKey, now); err != nil {
+		return false, err
+	}
+
+	valid, step, err := ValidateTOTPWithStep(secret, code, now)
+	if err != nil {
+		return false, err
+	}
+	if !valid {
+		m.recordTOTPFailureLocked(clientKey, now)
+		return false, nil
+	}
+
+	m.clearClientTOTPFailuresLocked(clientKey)
+	m.purgeUsedTOTPStepsLocked(now)
+
+	replayKey := totpReplayKey(secret, step)
+	if _, exists := m.usedTOTPSteps[replayKey]; exists {
+		return false, errors.New("this 2FA code has already been used; wait for the next authenticator code")
+	}
+	m.usedTOTPSteps[replayKey] = now
+
+	return true, nil
+}
+
+func (m *Manager) validateLeaseLocked(token string, now time.Time) (bool, string) {
+	if !m.enabled {
+		return true, ""
+	}
+
+	if token != "" {
+		if lease, exists := m.leases[token]; exists {
+			if !lease.ExpiresAt.IsZero() && now.After(lease.ExpiresAt) {
+				delete(m.leases, token)
+				return false, "SECURITY GATE: 2FA Lease time limit expired. Please unlock again."
+			}
+
+			lease.LastActivityAt = now
+			return true, ""
+		}
+	}
+
+	return false, "SECURITY GATE LOCKED: 2FA verification required. Please ask the user for their 6-digit Google Authenticator code, then invoke the 'unlock_gate' tool with the code to obtain a dynamic lease_token."
+}
+
+// AuthorizeManagement requires a valid active lease or a fresh current TOTP
+// before security-sensitive 2FA configuration can be changed.
+func (m *Manager) AuthorizeManagement(leaseToken, currentCode, clientKey string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.enabled {
+		return nil
+	}
+
+	if allowed, _ := m.validateLeaseLocked(leaseToken, time.Now()); allowed {
+		return nil
+	}
+
+	if strings.TrimSpace(currentCode) == "" {
+		return errors.New("2FA management requires a valid lease_token or current authenticator code")
+	}
+
+	valid, err := m.validateAndConsumeTOTPLocked(m.totpSecret, currentCode, clientKey)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return errors.New("invalid current authenticator code")
+	}
+
+	return nil
+}
+
 // CreateLease verifies the TOTP code and mints a dynamic lease token.
 // durationMinutes == 0 means permanent (never expires).
 func (m *Manager) CreateLease(code string, durationMinutes int, clientIP, country string) (string, error) {
@@ -265,7 +466,7 @@ func (m *Manager) CreateLease(code string, durationMinutes int, clientIP, countr
 		return "", errors.New("TOTP_SECRET is not configured. Please invoke setup_2fa first")
 	}
 
-	valid, err := ValidateTOTP(m.totpSecret, code, time.Now())
+	valid, err := m.validateAndConsumeTOTPLocked(m.totpSecret, code, clientIP)
 	if err != nil {
 		return "", err
 	}
@@ -275,7 +476,10 @@ func (m *Manager) CreateLease(code string, durationMinutes int, clientIP, countr
 
 	now := time.Now()
 	m.purgeExpiredLeasesLocked(now)
-	token := generateSecureToken("lease_")
+	token, err := generateSecureToken("lease_")
+	if err != nil {
+		return "", fmt.Errorf("failed to mint lease token: %w", err)
+	}
 
 	lease := &Lease{
 		Token:           token,
@@ -298,26 +502,7 @@ func (m *Manager) CreateLease(code string, durationMinutes int, clientIP, countr
 func (m *Manager) ValidateLease(token string) (bool, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	if !m.enabled {
-		return true, ""
-	}
-
-	now := time.Now()
-
-	if token != "" {
-		if lease, exists := m.leases[token]; exists {
-			if !lease.ExpiresAt.IsZero() && now.After(lease.ExpiresAt) {
-				delete(m.leases, token)
-				return false, "SECURITY GATE: 2FA Lease time limit expired. Please unlock again."
-			}
-
-			lease.LastActivityAt = now
-			return true, ""
-		}
-	}
-
-	return false, "SECURITY GATE LOCKED: 2FA verification required. Please ask the user for their 6-digit Google Authenticator code, then invoke the 'unlock_gate' tool with the code to obtain a dynamic lease_token."
+	return m.validateLeaseLocked(token, time.Now())
 }
 
 // CheckAccess provides a backward-compatible check.
@@ -328,9 +513,14 @@ func (m *Manager) CheckAccess() (bool, string) {
 // RecordActivity placeholder for backward compatibility.
 func (m *Manager) RecordActivity() {}
 
-// Unlock mints a lease for web UI or backward-compatible callers and returns the token.
+// Unlock mints a lease for backward-compatible callers.
 func (m *Manager) Unlock(code string) (string, error) {
 	return m.CreateLease(code, 0, "web_ui", "LOCAL")
+}
+
+// UnlockForClient preserves the real client identity for rate limiting and audit.
+func (m *Manager) UnlockForClient(code, clientIP, country string) (string, error) {
+	return m.CreateLease(code, 0, clientIP, country)
 }
 
 // RevokeLease removes a specific lease token.
@@ -454,13 +644,17 @@ func ResolveClientIP(r *http.Request) (string, string) {
 	return r.RemoteAddr, country
 }
 
-func generateSecureToken(prefix string) string {
+func generateSecureToken(prefix string) (string, error) {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return prefix + hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("secure random generation failed: %w", err)
+	}
+	return prefix + hex.EncodeToString(b), nil
 }
 
 // PersistEnv writes or updates key-value pairs in a .env file.
+// The replacement is atomic and process environment variables are updated only
+// after the durable file replacement succeeds.
 func PersistEnv(filePath string, updates map[string]string) error {
 	if filePath == "" || len(updates) == 0 {
 		return nil
@@ -484,23 +678,23 @@ func PersistEnv(filePath string, updates map[string]string) error {
 			if newVal, ok := updates[key]; ok {
 				lines = append(lines, fmt.Sprintf("%s=%s", key, newVal))
 				foundKeys[key] = true
-				_ = os.Setenv(key, newVal)
 			} else {
 				lines = append(lines, rawLine)
 				foundKeys[key] = true
 			}
 		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read env file: %w", err)
 	}
 
 	for key, val := range updates {
 		if !foundKeys[key] {
 			lines = append(lines, fmt.Sprintf("%s=%s", key, val))
 			foundKeys[key] = true
-			_ = os.Setenv(key, val)
 		}
 	}
 
-	// Safety: if AUTH_TOKEN is not in .env but is present in current environment, preserve it!
+	// Safety: if AUTH_TOKEN is not in .env but is present in current environment, preserve it.
 	if !foundKeys["AUTH_TOKEN"] {
 		if tok := os.Getenv("AUTH_TOKEN"); tok != "" {
 			lines = append([]string{fmt.Sprintf("AUTH_TOKEN=%s", tok)}, lines...)
@@ -512,5 +706,40 @@ func PersistEnv(filePath string, updates map[string]string) error {
 		outContent += "\n"
 	}
 
-	return os.WriteFile(filePath, []byte(outContent), 0600)
+	dir := filepath.Dir(filePath)
+	base := filepath.Base(filePath)
+	tmp, err := os.CreateTemp(dir, "."+base+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary env file: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}
+	defer cleanup()
+
+	if err := tmp.Chmod(0600); err != nil {
+		return fmt.Errorf("failed to secure temporary env file: %w", err)
+	}
+	if _, err := tmp.WriteString(outContent); err != nil {
+		return fmt.Errorf("failed to write temporary env file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temporary env file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close temporary env file: %w", err)
+	}
+	if err := os.Rename(tmpName, filePath); err != nil {
+		return fmt.Errorf("failed to atomically replace env file: %w", err)
+	}
+
+	for key, val := range updates {
+		if err := os.Setenv(key, val); err != nil {
+			return fmt.Errorf("env file persisted but failed to update process environment for %s: %w", key, err)
+		}
+	}
+
+	return nil
 }
