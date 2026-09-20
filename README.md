@@ -120,6 +120,8 @@ TOTP_SECRET=
 ### 3. 启动守护进程与 Cloudflare 隧道
 > ⚠️ **升级说明**：如果你是从 `v1.0.4` 或更早版本升级，建议先执行 `git pull`（或重新克隆仓库）再运行 `./scripts/daemon.sh update`。旧版 `daemon.sh` 只会替换二进制，不会自动更新自身，因此拿不到 v1.0.5+ 新增的 argv 脱敏、日志轮转和 SHA-256 校验逻辑。
 
+> 🛡️ **v1.0.7 安全加固**：SSE 长连接不再受全局写超时影响；显式系统环境变量优先于 `.env`；CI/Release 会执行 `govulncheck ./...`，并将 `golang.org/x/text` 升级到已修复 GO-2026-5970 的版本。
+
 项目自带高可用 Supervisor 脚本，支持进程自愈重启与 Termux 唤醒锁防休眠：
 ```bash
 chmod +x scripts/daemon.sh
