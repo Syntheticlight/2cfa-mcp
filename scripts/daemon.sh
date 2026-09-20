@@ -32,7 +32,9 @@ mkdir -p "${WORKSPACE_PATH}"
 
 BINARY="${ROOT_DIR}/build/2cfa-mcp"
 if [ ! -f "${BINARY}" ]; then
-    if [ -f "${ROOT_DIR}/build/2cfa-mcp-linux-arm64" ]; then
+    if [ -f "${ROOT_DIR}/build/2cfa-mcp-android-arm64" ]; then
+        BINARY="${ROOT_DIR}/build/2cfa-mcp-android-arm64"
+    elif [ -f "${ROOT_DIR}/build/2cfa-mcp-linux-arm64" ]; then
         BINARY="${ROOT_DIR}/build/2cfa-mcp-linux-arm64"
     elif [ -f "${ROOT_DIR}/build/2cfa-mcp-linux-amd64" ]; then
         BINARY="${ROOT_DIR}/build/2cfa-mcp-linux-amd64"

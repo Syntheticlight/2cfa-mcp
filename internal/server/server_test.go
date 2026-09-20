@@ -124,3 +124,38 @@ func TestSSERoutingWithPathToken(t *testing.T) {
 		t.Errorf("expected SSE endpoint event to contain dynamic base path /mcp/%s, got %s", token, body)
 	}
 }
+
+func TestCloudflareTunnelReverseProxyHostProtectionDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	token := "tunnel-test-token"
+	cfg := ServerConfig{
+		Port:          2232,
+		AuthToken:     token,
+		WorkspacePath: tmpDir,
+		ExecTimeout:   120 * time.Second,
+	}
+
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	// Simulate Cloudflare Tunnel request connecting from localhost with external domain Host header
+	req := httptest.NewRequest(http.MethodGet, "/mcp/"+token+"/sse", nil)
+	req.RemoteAddr = "127.0.0.1:45678"
+	req.Host = "mcp.example.com"
+	ctx, cancel := context.WithTimeout(req.Context(), 100*time.Millisecond)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	srv.httpSrv.Handler.ServeHTTP(rec, req)
+
+	// Must NOT be blocked with 403 Forbidden ("invalid Host header")
+	if rec.Code == http.StatusForbidden {
+		t.Fatalf("Cloudflare Tunnel request was rejected with 403 Forbidden due to Host header protection: %s", rec.Body.String())
+	}
+	if rec.Header().Get("Content-Type") != "text/event-stream" {
+		t.Errorf("expected text/event-stream, got %s", rec.Header().Get("Content-Type"))
+	}
+}

@@ -99,7 +99,11 @@ TOTP_SECRET=
   ```bash
   make build
   ```
-- **交叉编译（Android Termux / 树莓派 ARM64）**：
+- **交叉编译（Android Termux 原生静态版）**：
+  ```bash
+  make build-android-arm64
+  ```
+- **交叉编译（Linux ARM64 / 树莓派）**：
   ```bash
   make build-linux-arm64
   ```

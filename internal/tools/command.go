@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -90,12 +93,8 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 			execCtx = ctx
 		}
 
-		var cmd *exec.Cmd
-		if runtime.GOOS == "windows" {
-			cmd = exec.CommandContext(execCtx, "cmd.exe", "/c", command)
-		} else {
-			cmd = exec.CommandContext(execCtx, "sh", "-c", command)
-		}
+		shellBin, shellArg := resolveShell()
+		cmd := exec.CommandContext(execCtx, shellBin, shellArg, command)
 
 		cmd.Dir = execDir
 
@@ -163,4 +162,51 @@ func truncateStr(s string, maxLen int) string {
 		return s[:maxLen] + "..."
 	}
 	return s
+}
+
+// resolveShell returns the shell executable and argument flag appropriate for the host platform.
+// It prioritizes absolute paths to prevent Go's os/exec from invoking LookPath, which on modern Go
+// uses faccessat2 — a system call blocked by seccomp on certain Android kernels (e.g. OnePlus 9R)
+// leading to SIGSYS (bad system call) crashes.
+func resolveShell() (string, string) {
+	if runtime.GOOS == "windows" {
+		return "cmd.exe", "/c"
+	}
+
+	// 1. Check $SHELL environment variable if it points to an existing absolute path
+	if envShell := os.Getenv("SHELL"); strings.HasPrefix(envShell, "/") {
+		if _, err := os.Stat(envShell); err == nil {
+			return envShell, "-c"
+		}
+	}
+
+	// 2. Check Android Termux $PREFIX if present
+	if termuxPrefix := os.Getenv("PREFIX"); termuxPrefix != "" {
+		for _, sub := range []string{"bin/bash", "bin/sh"} {
+			p := filepath.Join(termuxPrefix, sub)
+			if _, err := os.Stat(p); err == nil {
+				return p, "-c"
+			}
+		}
+	}
+
+	// 3. Known absolute paths across Termux, Android OS, and standard Linux/macOS
+	candidates := []string{
+		"/data/data/com.termux/files/usr/bin/bash",
+		"/data/data/com.termux/files/usr/bin/sh",
+		"/bin/bash",
+		"/bin/sh",
+		"/usr/bin/bash",
+		"/usr/bin/sh",
+		"/system/bin/sh",
+	}
+
+	for _, cand := range candidates {
+		if _, err := os.Stat(cand); err == nil {
+			return cand, "-c"
+		}
+	}
+
+	// 4. Fallback (if no absolute path exists)
+	return "sh", "-c"
 }

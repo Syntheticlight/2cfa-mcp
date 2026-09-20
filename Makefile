@@ -1,4 +1,4 @@
-.PHONY: all build build-linux-arm64 build-linux-amd64 test clean run
+.PHONY: all build build-android-arm64 build-linux-arm64 build-linux-amd64 test clean run
 
 BINARY_NAME=2cfa-mcp
 BUILD_DIR=build
@@ -11,8 +11,13 @@ build:
 	@mkdir -p $(BUILD_DIR)
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/server
 
+build-android-arm64:
+	@echo "Cross-compiling for Android Termux native (arm64)..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-android-arm64 ./cmd/server
+
 build-linux-arm64:
-	@echo "Cross-compiling for Linux / Android Termux (arm64)..."
+	@echo "Cross-compiling for Linux / Raspberry Pi (arm64)..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/server
 

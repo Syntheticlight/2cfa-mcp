@@ -65,6 +65,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	// Create SSE Server with dynamic base path and query preservation
 	sseSrv := server.NewSSEServer(
 		mcpSrv,
+		server.WithSSEDisableLocalhostProtection(true),
 		server.WithAppendQueryToMessageEndpoint(),
 		server.WithDynamicBasePath(func(r *http.Request, sessionID string) string {
 			if strings.HasPrefix(r.URL.Path, "/mcp/") {
@@ -78,7 +79,10 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	)
 
 	// Create Streamable HTTP Server
-	streamableSrv := server.NewStreamableHTTPServer(mcpSrv)
+	streamableSrv := server.NewStreamableHTTPServer(
+		mcpSrv,
+		server.WithDisableLocalhostProtection(true),
+	)
 
 	mux := http.NewServeMux()
 

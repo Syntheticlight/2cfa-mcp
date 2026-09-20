@@ -147,3 +147,20 @@ func extractLeaseToken(text string) string {
 	}
 	return sub
 }
+
+func TestResolveShell(t *testing.T) {
+	bin, flag := resolveShell()
+	if bin == "" || flag == "" {
+		t.Fatalf("resolveShell returned empty values: bin=%q, flag=%q", bin, flag)
+	}
+
+	if strings.Contains(bin, "cmd.exe") {
+		if flag != "/c" {
+			t.Errorf("expected /c for cmd.exe, got %s", flag)
+		}
+	} else {
+		if flag != "-c" {
+			t.Errorf("expected -c for unix shells, got %s", flag)
+		}
+	}
+}
