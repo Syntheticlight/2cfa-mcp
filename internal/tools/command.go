@@ -95,6 +95,7 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 
 		shellBin, shellArg := resolveShell()
 		cmd := exec.CommandContext(execCtx, shellBin, shellArg, command)
+		configureCommandCancellation(cmd)
 
 		cmd.Dir = execDir
 
