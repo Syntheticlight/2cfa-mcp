@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -306,5 +307,26 @@ func TestCappedBufferBoundedMemory(t *testing.T) {
 	}
 	if !buf.Truncated() {
 		t.Fatal("expected buffer to report truncation")
+	}
+}
+
+
+func TestResolveHeaderIPPrefersSanitizedServerIdentity(t *testing.T) {
+	header := make(http.Header)
+	header.Set("X-2CFA-Client-IP", "203.0.113.7")
+	header.Set("X-2CFA-Client-Country", "pl")
+	header.Set("CF-Connecting-IP", "198.51.100.20")
+
+	ip, country := resolveHeaderIP(header)
+	if ip != "203.0.113.7" || country != "PL" {
+		t.Fatalf("unexpected sanitized identity: %s/%s", ip, country)
+	}
+
+	header.Set("X-2CFA-Client-IP", "<script>alert(1)</script>")
+	header.Set("X-2CFA-Client-Country", "<x>")
+	header.Del("CF-Connecting-IP")
+	ip, country = resolveHeaderIP(header)
+	if ip != "127.0.0.1" || country != "LOCAL" {
+		t.Fatalf("invalid identity headers should be rejected, got %s/%s", ip, country)
 	}
 }
