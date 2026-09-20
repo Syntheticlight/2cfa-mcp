@@ -60,6 +60,16 @@ fi
 
 LOG_FILE="${ROOT_DIR}/2cfa-mcp.log"
 PID_FILE="${ROOT_DIR}/2cfa-mcp.pid"
+MAX_LOG_BYTES="${MAX_LOG_BYTES:-10485760}" # 10 MiB, keep one rotated copy
+
+rotate_log_if_needed() {
+    [ -f "${LOG_FILE}" ] || return 0
+    LOG_SIZE=$(wc -c < "${LOG_FILE}" 2>/dev/null | tr -d " " || echo 0)
+    if [ "${LOG_SIZE:-0}" -ge "${MAX_LOG_BYTES}" ]; then
+        cp -f "${LOG_FILE}" "${LOG_FILE}.1" 2>/dev/null || true
+        : > "${LOG_FILE}"
+    fi
+}
 
 start_supervisor_loop() {
     if command -v termux-wake-lock >/dev/null 2>&1; then
@@ -75,10 +85,19 @@ start_supervisor_loop() {
         # Do NOT pass -2fa or -totp-secret flags: binary natively loads .env as single source of truth!
         # AUTH_TOKEN stays in the environment; never place secrets in argv where
         # they can be exposed through ps or /proc/<pid>/cmdline.
+        rotate_log_if_needed
         "${BINARY}" \
             -port="${PORT:-2232}" \
             -workspace="${WORKSPACE_PATH:-${ROOT_DIR}/workspace}" \
-            -timeout="${EXEC_TIMEOUT:-120}" >> "${LOG_FILE}" 2>&1 || true
+            -timeout="${EXEC_TIMEOUT:-120}" >> "${LOG_FILE}" 2>&1 &
+        SERVER_PID=$!
+
+        # Keep long-running installations from growing a single log forever.
+        while kill -0 "${SERVER_PID}" 2>/dev/null; do
+            sleep 60
+            rotate_log_if_needed
+        done
+        wait "${SERVER_PID}" 2>/dev/null || true
 
         echo "[WARNING] Server crashed or stopped. Restarting in 3 seconds..." >> "${LOG_FILE}"
         sleep 3
