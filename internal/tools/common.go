@@ -3,12 +3,22 @@ package tools
 import (
 	"net/http"
 	"strings"
+
+	"github.com/Syntheticlight/2cfa-mcp/internal/auth"
 )
 
 // resolveHeaderIP parses client IP and country from MCP CallToolRequest HTTP headers.
 func resolveHeaderIP(header http.Header) (string, string) {
 	if header == nil {
 		return "127.0.0.1", "LOCAL"
+	}
+
+	if canonicalIP := strings.TrimSpace(header.Get(auth.CanonicalClientIPHeader)); canonicalIP != "" {
+		country := strings.TrimSpace(header.Get(auth.CanonicalClientCountryHeader))
+		if country == "" {
+			country = "LOCAL"
+		}
+		return canonicalIP, country
 	}
 
 	country := header.Get("CF-IPCountry")
