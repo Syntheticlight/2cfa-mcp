@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mark3labs/mcp-go/server"
 	"github.com/Syntheticlight/2cfa-mcp/internal/auth"
 	"github.com/Syntheticlight/2cfa-mcp/internal/gate"
 	"github.com/Syntheticlight/2cfa-mcp/internal/tools"
+	"github.com/mark3labs/mcp-go/server"
 )
 
 // ServerConfig defines the server configuration parameters.
