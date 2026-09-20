@@ -202,3 +202,28 @@ func TestSSERoutingTrailingSlashAndDirectAccept(t *testing.T) {
 		t.Errorf("expected text/event-stream for direct accept header, got %s", recDirect.Header().Get("Content-Type"))
 	}
 }
+
+
+func TestGateLikePathCannotBypassAuth(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := ServerConfig{
+		Port:          2232,
+		AuthToken:     "gate-bypass-test-token",
+		WorkspacePath: tmpDir,
+		ExecTimeout:   120 * time.Second,
+	}
+
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("failed to create server: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/gateevil", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	rec := httptest.NewRecorder()
+	srv.httpSrv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected auth rejection for /gateevil, got %d", rec.Code)
+	}
+}
