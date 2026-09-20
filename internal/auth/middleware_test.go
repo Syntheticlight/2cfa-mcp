@@ -63,6 +63,16 @@ func TestAuthenticate(t *testing.T) {
 			path:           "/mcp/" + secretToken + "/sse",
 			expectedStatus: http.StatusOK,
 		},
+		{
+			name:           "gate lookalike path must not bypass auth",
+			path:           "/gateevil",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "gate prefix lookalike must not bypass auth",
+			path:           "/gate123/api/status",
+			expectedStatus: http.StatusUnauthorized,
+		},
 	}
 
 	for _, tt := range tests {
