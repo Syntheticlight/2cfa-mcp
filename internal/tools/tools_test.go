@@ -311,7 +311,6 @@ func TestCappedBufferBoundedMemory(t *testing.T) {
 	}
 }
 
-
 func TestCommandAuditRedactsArguments(t *testing.T) {
 	tmpDir := t.TempDir()
 	gateMgr := gate.NewManager(gate.Config{Enabled: false})
