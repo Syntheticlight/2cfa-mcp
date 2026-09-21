@@ -53,6 +53,43 @@ func TestHealthCheckZeroLeakage(t *testing.T) {
 	}
 }
 
+func TestStreamableRoutingIgnoresCredentialText(t *testing.T) {
+	for _, token := range []string{"message-token", "sse"} {
+		t.Run(token, func(t *testing.T) {
+			srv, err := NewServer(ServerConfig{AuthToken: token, WorkspacePath: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/mcp/"+token,
+				strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Accept", "application/json, text/event-stream")
+			rec := httptest.NewRecorder()
+			srv.httpSrv.Handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "serverInfo") {
+				t.Fatalf("credential changed transport routing: %d %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestStreamableGETIsNotRoutedToLegacySSE(t *testing.T) {
+	srv, err := NewServer(ServerConfig{AuthToken: "test-token", WorkspacePath: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/mcp/test-token", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Mcp-Session-Id", "unknown-session")
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	rec := httptest.NewRecorder()
+	srv.httpSrv.Handler.ServeHTTP(rec, req.WithContext(ctx))
+	if strings.Contains(rec.Body.String(), "event: endpoint") || rec.Code != http.StatusOK {
+		t.Fatalf("streamable session routed to legacy SSE: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestGateDashboardAccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := ServerConfig{

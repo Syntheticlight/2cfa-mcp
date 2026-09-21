@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -30,6 +31,9 @@ func TestLoadDotEnvPreservesExistingEnvironment(t *testing.T) {
 }
 
 func TestLoadDotEnvTightensFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows permissions use ACLs rather than Unix mode bits")
+	}
 	tmp := t.TempDir()
 	envFile := filepath.Join(tmp, ".env")
 	if err := os.WriteFile(envFile, []byte("PERMISSION_TEST=value\n"), 0644); err != nil {

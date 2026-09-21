@@ -1,7 +1,9 @@
 package security
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -57,5 +59,55 @@ func TestSafePath(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWorkspaceHandleRejectsLinkReplacedAfterValidation(t *testing.T) {
+	workspace, outside := t.TempDir(), t.TempDir()
+	target := filepath.Join(workspace, "target")
+	if err := os.WriteFile(target, []byte("inside"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	root, relative, err := OpenWorkspacePath(workspace, "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "created.txt"), target); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink privilege unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+	if err := root.WriteFile(relative, []byte("escaped"), 0600); err == nil {
+		t.Fatal("write followed a link replaced after validation")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "created.txt")); !os.IsNotExist(err) {
+		t.Fatalf("outside file unexpectedly exists: %v", err)
+	}
+}
+
+func TestWorkspaceHandleAllowsRelativeLinksInsideRoot(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "target"), []byte("inside"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("target", filepath.Join(workspace, "link")); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink privilege unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+	root, relative, err := OpenWorkspacePath(workspace, "link")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	data, err := root.ReadFile(relative)
+	if err != nil || string(data) != "inside" {
+		t.Fatalf("internal link failed: %q, %v", data, err)
 	}
 }

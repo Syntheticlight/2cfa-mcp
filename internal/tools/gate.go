@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -36,14 +37,10 @@ func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
 		currentCode := strings.TrimSpace(request.GetString("current_code", ""))
 		managementLease := strings.TrimSpace(request.GetString("lease_token", ""))
 		ip, country := resolveHeaderIP(request.Header)
+		credentials := gate.ManagementCredentials{LeaseToken: managementLease, CurrentCode: currentCode, ClientIP: ip}
 
 		if !enable {
-			if gateMgr.GetState().Enabled {
-				if err := gateMgr.AuthorizeManagement(managementLease, currentCode, ip); err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("refusing to disable 2FA: %v", err)), nil
-				}
-			}
-			if err := gateMgr.Disable2FA(); err != nil {
+			if err := gateMgr.Disable2FA(credentials); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to disable 2FA: %v", err)), nil
 			}
 			message := "2FA Gate has been DISABLED. The server is now in default Token-only direct mode (no 2FA required)."
@@ -82,7 +79,7 @@ Current Status: %s
 		if code != "" {
 			_, sessionLease, err := gateMgr.ConfirmSetup2FA(code, ip, country)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("2FA Confirmation FAILED: %v. (2FA remains inactive to prevent accidental lockout).", err)), nil
+				return mcp.NewToolResultError(fmt.Sprintf("2FA Confirmation FAILED: %v. The existing 2FA configuration is unchanged.", err)), nil
 			}
 
 			msg := fmt.Sprintf(`🎉 2FA Verification SUCCESSFUL!
@@ -117,14 +114,7 @@ Dynamic Lease Token: %s (Auto-unlocked for this session)
 		}
 
 		// Stage 1: No code provided -> Initiate setup, generate secret, and prompt user for confirmation code.
-		// Reconfiguring an already-enabled gate requires proof of the existing second factor.
-		if gateMgr.GetState().Enabled {
-			if err := gateMgr.AuthorizeManagement(managementLease, currentCode, ip); err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("refusing to reconfigure active 2FA: %v", err)), nil
-			}
-		}
-
-		pendingSecret, err := gateMgr.BeginSetup2FA(secret)
+		pendingSecret, err := gateMgr.BeginSetup2FA(secret, credentials)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to initiate 2FA setup: %v", err)), nil
 		}
@@ -202,12 +192,11 @@ OTP Auth URI:  %s
 			return mcp.NewToolResultError("argument 'code' is required and must be a 6-digit string"), nil
 		}
 
-		durationMinutes := int(request.GetFloat("duration_minutes", 0))
-		if durationMinutes < 0 {
-			durationMinutes = 0
-		} else if durationMinutes > 525600 {
-			durationMinutes = 525600
+		durationValue := request.GetFloat("duration_minutes", 0)
+		if math.IsNaN(durationValue) || math.IsInf(durationValue, 0) || durationValue < 0 || durationValue > gate.MaxLeaseDurationMinutes || math.Trunc(durationValue) != durationValue {
+			return mcp.NewToolResultError("duration_minutes must be a whole number between 0 and 525600; 0 means no time expiry"), nil
 		}
+		durationMinutes := int(durationValue)
 
 		token, err := gateMgr.CreateLease(code, durationMinutes, ip, country)
 		duration := time.Since(start).Milliseconds()
@@ -289,8 +278,11 @@ Duration: %s
 			Message:    "Gate locked",
 		})
 
-		message := "Security Gate has been LOCKED. Further tool executions will require 2FA verification."
 		state := gateMgr.GetState()
+		message := "Security Gate has been LOCKED. Further tool executions will require 2FA verification."
+		if !state.Enabled {
+			message = "All leases and pending setup have been revoked. 2FA is disabled; tools remain available in Token-only mode."
+		}
 		scope := "all_leases"
 		if leaseToken != "" {
 			scope = "specific_lease"
