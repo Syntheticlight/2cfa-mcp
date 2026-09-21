@@ -27,6 +27,7 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 		mcp.WithDescription("Read file contents from workspace"),
 		mcp.WithString("path", mcp.Required(), mcp.Description("File path relative to workspace root")),
 		mcp.WithString("lease_token", mcp.Description("Optional. Leave empty in normal use. Only pass if 2FA gate was explicitly turned on")),
+		mcp.WithOutputSchema[ReadFileOutput](),
 	)
 
 	s.AddTool(readTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -108,7 +109,13 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			Message:    fmt.Sprintf("Read %s (%d bytes)", relPath, len(content)),
 		})
 
-		return mcp.NewToolResultText(string(content)), nil
+		result := ReadFileOutput{
+			Success: true,
+			Path:    relPath,
+			Content: string(content),
+			Size:    len(content),
+		}
+		return mcp.NewToolResultStructured(result, string(content)), nil
 	})
 
 	// 2. write_file
@@ -117,6 +124,7 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 		mcp.WithString("path", mcp.Required(), mcp.Description("File path relative to workspace root")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("Content to write into the file")),
 		mcp.WithString("lease_token", mcp.Description("Optional. Leave empty in normal use. Only pass if 2FA gate was explicitly turned on")),
+		mcp.WithOutputSchema[WriteFileOutput](),
 	)
 
 	s.AddTool(writeTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -182,7 +190,12 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			Message:    fmt.Sprintf("Wrote %s (%d bytes)", relPath, len(content)),
 		})
 
-		return mcp.NewToolResultText(fmt.Sprintf("successfully wrote %d bytes to %s", len(content), relPath)), nil
+		result := WriteFileOutput{
+			Success:      true,
+			Path:         relPath,
+			BytesWritten: len(content),
+		}
+		return mcp.NewToolResultStructured(result, fmt.Sprintf("successfully wrote %d bytes to %s", len(content), relPath)), nil
 	})
 
 	// 3. list_dir
@@ -190,6 +203,7 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 		mcp.WithDescription("List contents of a directory within workspace"),
 		mcp.WithString("path", mcp.Description("Directory path relative to workspace root (defaults to workspace root if empty)")),
 		mcp.WithString("lease_token", mcp.Description("Optional. Leave empty in normal use. Only pass if 2FA gate was explicitly turned on")),
+		mcp.WithOutputSchema[ListDirOutput](),
 	)
 
 	s.AddTool(listTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -245,6 +259,8 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			entries = entries[:MaxListDirEntries]
 		}
 
+		structuredEntries := make([]DirectoryEntry, 0, len(entries))
+
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("Directory listing for: %s\n\n", relPath))
 		sb.WriteString(fmt.Sprintf("%-30s %-10s %-12s %s\n", "NAME", "TYPE", "SIZE", "MODIFIED"))
@@ -257,11 +273,21 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			}
 
 			entryType := "FILE"
-			sizeStr := fmt.Sprintf("%d B", info.Size())
+			entrySize := info.Size()
+			sizeStr := fmt.Sprintf("%d B", entrySize)
 			if entry.IsDir() {
 				entryType = "DIR"
+				entrySize = 0
 				sizeStr = "-"
 			}
+
+			modified := info.ModTime().UTC().Format(time.RFC3339)
+			structuredEntries = append(structuredEntries, DirectoryEntry{
+				Name:     entry.Name(),
+				Type:     entryType,
+				Size:     entrySize,
+				Modified: modified,
+			})
 
 			sb.WriteString(fmt.Sprintf("%-30s %-10s %-12s %s\n",
 				entry.Name(), entryType, sizeStr, info.ModTime().Format("2006-01-02 15:04:05")))
@@ -280,6 +306,13 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			Message:    fmt.Sprintf("Listed %s (%d entries)", relPath, len(entries)),
 		})
 
-		return mcp.NewToolResultText(sb.String()), nil
+		result := ListDirOutput{
+			Success:   true,
+			Path:      relPath,
+			Entries:   structuredEntries,
+			Count:     len(structuredEntries),
+			Truncated: truncated,
+		}
+		return mcp.NewToolResultStructured(result, sb.String()), nil
 	})
 }

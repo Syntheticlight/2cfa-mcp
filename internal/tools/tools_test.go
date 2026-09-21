@@ -428,3 +428,90 @@ func TestReadFileRejectsOversizedContent(t *testing.T) {
 		t.Fatal("expected oversized file read to be rejected")
 	}
 }
+
+func TestAllToolsDeclareOutputSchemas(t *testing.T) {
+	tmpDir := t.TempDir()
+	gateMgr := gate.NewManager(gate.Config{Enabled: false})
+	mcpSrv := server.NewMCPServer("schema-test", "1.0.0")
+
+	RegisterGateTools(mcpSrv, gateMgr)
+	RegisterCommandTool(mcpSrv, tmpDir, 5*time.Second, gateMgr)
+	RegisterFileTools(mcpSrv, tmpDir, gateMgr)
+	RegisterSysInfoTool(mcpSrv, gateMgr)
+
+	for _, name := range []string{
+		"check_update",
+		"execute_command",
+		"list_dir",
+		"lock_gate",
+		"read_file",
+		"setup_2fa",
+		"system_info",
+		"system_status",
+		"unlock_gate",
+		"write_file",
+	} {
+		tool := mcpSrv.GetTool(name)
+		if tool.Tool.OutputSchema.Type != "object" {
+			t.Fatalf("%s must declare an object output schema, got %q", name, tool.Tool.OutputSchema.Type)
+		}
+		if len(tool.Tool.OutputSchema.Properties) == 0 {
+			t.Fatalf("%s output schema must declare properties", name)
+		}
+	}
+}
+
+func TestCoreToolsReturnStructuredContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	gateMgr := gate.NewManager(gate.Config{Enabled: false})
+	mcpSrv := server.NewMCPServer("structured-test", "1.0.0")
+
+	RegisterGateTools(mcpSrv, gateMgr)
+	RegisterCommandTool(mcpSrv, tmpDir, 5*time.Second, gateMgr)
+	RegisterFileTools(mcpSrv, tmpDir, gateMgr)
+	RegisterSysInfoTool(mcpSrv, gateMgr)
+
+	assertStructured := func(name string, ctx context.Context, args map[string]any) *mcp.CallToolResult {
+		t.Helper()
+		tool := mcpSrv.GetTool(name)
+		req := mcp.CallToolRequest{}
+		req.Params.Name = name
+		req.Params.Arguments = args
+		res, err := tool.Handler(ctx, req)
+		if err != nil {
+			t.Fatalf("%s handler error: %v", name, err)
+		}
+		if res == nil || res.IsError {
+			t.Fatalf("%s expected successful result, got %+v", name, res)
+		}
+		if res.StructuredContent == nil {
+			t.Fatalf("%s must return structuredContent on success", name)
+		}
+		if len(res.Content) == 0 {
+			t.Fatalf("%s must retain text fallback content", name)
+		}
+		return res
+	}
+
+	assertStructured("execute_command", context.Background(), map[string]any{"command": "echo structured"})
+	assertStructured("write_file", context.Background(), map[string]any{"path": "a.txt", "content": "hello"})
+	assertStructured("read_file", context.Background(), map[string]any{"path": "a.txt"})
+	assertStructured("list_dir", context.Background(), map[string]any{"path": ""})
+	assertStructured("setup_2fa", context.Background(), map[string]any{
+		"enable": true,
+		"secret": "JBSWY3DPEHPK3PXP",
+	})
+
+	disabledUnlock := assertStructured("unlock_gate", context.Background(), map[string]any{"code": "000000"})
+	if out, ok := disabledUnlock.StructuredContent.(UnlockGateOutput); !ok || out.Status != "DISABLED" {
+		t.Fatalf("unlock_gate structured output mismatch: %#v", disabledUnlock.StructuredContent)
+	}
+
+	assertStructured("lock_gate", context.Background(), map[string]any{})
+	assertStructured("system_status", context.Background(), map[string]any{})
+	assertStructured("system_info", context.Background(), map[string]any{})
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	assertStructured("check_update", cancelled, map[string]any{"force": true})
+}

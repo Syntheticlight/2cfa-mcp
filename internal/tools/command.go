@@ -35,6 +35,7 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 		mcp.WithString("work_dir", mcp.Description("Optional sub-directory relative to workspace root")),
 		mcp.WithNumber("timeout_seconds", mcp.Description("Optional execution timeout in seconds (e.g. 600 or 1800 for long tasks/downloads). Positive values are capped at 7 days; set -1 for unlimited")),
 		mcp.WithString("lease_token", mcp.Description("Optional. Leave empty in normal use. Only pass if 2FA gate was explicitly turned on")),
+		mcp.WithOutputSchema[CommandOutput](),
 	)
 
 	s.AddTool(tool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -110,8 +111,10 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 
 		cmdErr := cmd.Run()
 
-		stdoutStr := stdoutBuf.String()
-		stderrStr := stderrBuf.String()
+		rawStdout := stdoutBuf.String()
+		rawStderr := stderrBuf.String()
+		stdoutStr := rawStdout
+		stderrStr := rawStderr
 		if stdoutBuf.Truncated() {
 			stdoutStr += "\n... [stdout truncated at 4MB while command was running. Tip: redirect large output to file with > file.log]"
 		}
@@ -136,6 +139,10 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 		}
 
 		if cmdErr != nil {
+			exitCode := -1
+			if exitErr, ok := cmdErr.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			}
 			gateMgr.AddAudit(gate.AuditEntry{
 				Timestamp:  time.Now(),
 				ClientIP:   ip,
@@ -145,7 +152,17 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 				Status:     "ERROR",
 				Message:    fmt.Sprintf("Exited with error: %v", cmdErr),
 			})
-			return mcp.NewToolResultText(fmt.Sprintf("Command exited with status error: %v\n%s", cmdErr, output)), nil
+			result := CommandOutput{
+				Success:         false,
+				Stdout:          rawStdout,
+				Stderr:          rawStderr,
+				ExitCode:        exitCode,
+				DurationMs:      duration,
+				TimedOut:        false,
+				StdoutTruncated: stdoutBuf.Truncated(),
+				StderrTruncated: stderrBuf.Truncated(),
+			}
+			return mcp.NewToolResultStructured(result, fmt.Sprintf("Command exited with status error: %v\n%s", cmdErr, output)), nil
 		}
 
 		gateMgr.AddAudit(gate.AuditEntry{
@@ -160,7 +177,17 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 			Message: "Command executed",
 		})
 
-		return mcp.NewToolResultText(output), nil
+		result := CommandOutput{
+			Success:         true,
+			Stdout:          rawStdout,
+			Stderr:          rawStderr,
+			ExitCode:        0,
+			DurationMs:      duration,
+			TimedOut:        false,
+			StdoutTruncated: stdoutBuf.Truncated(),
+			StderrTruncated: stderrBuf.Truncated(),
+		}
+		return mcp.NewToolResultStructured(result, output), nil
 	})
 }
 

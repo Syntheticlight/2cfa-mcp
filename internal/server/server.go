@@ -49,8 +49,9 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	}
 
 	mcpSrv := server.NewMCPServer(
-		"2cfa-mcp", "1.0.9",
+		"2cfa-mcp", "1.0.10",
 		server.WithDescription("High-security, low-memory remote MCP Server for edge devices"),
+		server.WithOutputSchemaValidation(),
 	)
 
 	// Initialize 2FA Gate Manager

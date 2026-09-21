@@ -61,6 +61,25 @@ func RegisterSysInfoTool(s *server.MCPServer, gateMgr *gate.Manager) {
 			sb.WriteString("Status:            LOCKED (Call unlock_gate with Google Authenticator code)\n")
 		}
 
+		result := SystemStatusOutput{
+			Version:         updater.CurrentVersion,
+			LatestVersion:   upInfo.LatestVersion,
+			UpdateAvailable: upInfo.HasUpdate,
+			ReleaseURL:      upInfo.ReleaseURL,
+			OS:              runtime.GOOS,
+			Architecture:    runtime.GOARCH,
+			LogicalCPUs:     runtime.NumCPU(),
+			Goroutines:      runtime.NumGoroutine(),
+			UptimeSeconds:   int64(uptime / time.Second),
+			AllocatedRAMMB:  float64(m.Alloc) / 1024 / 1024,
+			RuntimeSysMB:    float64(m.Sys) / 1024 / 1024,
+			HeapAllocatedMB: float64(m.HeapAlloc) / 1024 / 1024,
+			GCCycles:        m.NumGC,
+			GateEnabled:     gateState.Enabled,
+			GateStatus:      gateState.Status,
+			ActiveLeases:    gateState.ActiveLeasesCount,
+		}
+
 		gateMgr.AddAudit(gate.AuditEntry{
 			Timestamp:  time.Now(),
 			ClientIP:   ip,
@@ -71,16 +90,18 @@ func RegisterSysInfoTool(s *server.MCPServer, gateMgr *gate.Manager) {
 			Message:    "Retrieved system and gate status",
 		})
 
-		return mcp.NewToolResultText(sb.String()), nil
+		return mcp.NewToolResultStructured(result, sb.String()), nil
 	}
 
 	toolStatus := mcp.NewTool("system_status",
 		mcp.WithDescription("Get OS/architecture, logical CPU count, Go process memory/runtime metrics, 2FA gate status, and version update information. Harmless read-only tool."),
+		mcp.WithOutputSchema[SystemStatusOutput](),
 	)
 	s.AddTool(toolStatus, statusHandler)
 
 	toolInfo := mcp.NewTool("system_info",
 		mcp.WithDescription("Alias for system_status"),
+		mcp.WithOutputSchema[SystemStatusOutput](),
 	)
 	s.AddTool(toolInfo, statusHandler)
 
@@ -88,6 +109,7 @@ func RegisterSysInfoTool(s *server.MCPServer, gateMgr *gate.Manager) {
 	checkUpdateTool := mcp.NewTool("check_update",
 		mcp.WithDescription("Check GitHub for the latest 2cfa-mcp release and compare with current version. Harmless read-only tool."),
 		mcp.WithBoolean("force", mcp.Description("Optional. Set true to bypass cache and check GitHub API immediately")),
+		mcp.WithOutputSchema[CheckUpdateOutput](),
 	)
 	s.AddTool(checkUpdateTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		force := request.GetBool("force", false)
@@ -105,6 +127,20 @@ func RegisterSysInfoTool(s *server.MCPServer, gateMgr *gate.Manager) {
 		if info.CheckError != "" {
 			sb.WriteString(fmt.Sprintf("Notice: %s\n", info.CheckError))
 		}
-		return mcp.NewToolResultText(sb.String()), nil
+		result := CheckUpdateOutput{
+			CurrentVersion: info.CurrentVersion,
+			LatestVersion:  info.LatestVersion,
+			HasUpdate:      info.HasUpdate,
+			ReleaseURL:     info.ReleaseURL,
+			ReleaseName:    info.ReleaseName,
+			CheckError:     info.CheckError,
+		}
+		if !info.PublishedAt.IsZero() {
+			result.PublishedAt = info.PublishedAt.UTC().Format(time.RFC3339)
+		}
+		if !info.CheckedAt.IsZero() {
+			result.CheckedAt = info.CheckedAt.UTC().Format(time.RFC3339)
+		}
+		return mcp.NewToolResultStructured(result, sb.String()), nil
 	})
 }
