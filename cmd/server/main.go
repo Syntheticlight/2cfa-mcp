@@ -33,29 +33,32 @@ func main() {
 	// Auto-load .env if present and set env vars not yet configured in OS
 	envPath := loadDotEnv(".env", "../.env")
 
-	// Parse CLI flags and environment variables
+	// Parse non-secret CLI flags. Secrets are intentionally accepted only
+	// through the process environment/.env so they never appear in argv.
 	portFlag := flag.Int("port", getEnvInt("PORT", 2232), "Server listening port")
-	tokenFlag := flag.String("token", os.Getenv("AUTH_TOKEN"), "Secret authentication token")
 	workspaceFlag := flag.String("workspace", getEnvStr("WORKSPACE_PATH", "."), "Allowed workspace directory")
 	timeoutFlag := flag.Int("timeout", getEnvInt("EXEC_TIMEOUT", 120), "Default execution timeout in seconds")
-
-	// 2FA Gate flags (Defaults to false for zero-friction direct token connect)
 	enable2FAFlag := flag.Bool("2fa", getEnvBool("ENABLE_2FA_GATE", false), "Enable 2FA Gate physical protection (false by default)")
-	totpSecretFlag := flag.String("totp-secret", getEnvStr("TOTP_SECRET", ""), "Base32 TOTP secret for Google Authenticator")
 
 	flag.Parse()
 
-	if *tokenFlag == "" {
-		log.Fatalf("[FATAL] AUTH_TOKEN must be set via env or -token flag for security!")
+	authToken := os.Getenv("AUTH_TOKEN")
+	totpSecret := getEnvStr("TOTP_SECRET", "")
+
+	if authToken == "" {
+		log.Fatalf("[FATAL] AUTH_TOKEN must be set via environment or .env")
+	}
+	if *enable2FAFlag && strings.TrimSpace(totpSecret) == "" {
+		log.Fatalf("[FATAL] ENABLE_2FA_GATE=true requires TOTP_SECRET; disable 2FA or configure a valid TOTP secret before startup")
 	}
 
 	cfg := server.ServerConfig{
 		Port:          *portFlag,
-		AuthToken:     *tokenFlag,
+		AuthToken:     authToken,
 		WorkspacePath: *workspaceFlag,
 		ExecTimeout:   time.Duration(*timeoutFlag) * time.Second,
 		Enable2FAGate: *enable2FAFlag,
-		TOTPSecret:    *totpSecretFlag,
+		TOTPSecret:    totpSecret,
 		EnvPath:       envPath,
 	}
 
