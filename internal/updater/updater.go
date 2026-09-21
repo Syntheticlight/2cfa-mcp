@@ -32,6 +32,7 @@ type UpdateInfo struct {
 }
 
 var (
+	checkMu    sync.Mutex // serialize remote checks without blocking cached readers
 	mu         sync.RWMutex
 	cachedInfo UpdateInfo = UpdateInfo{
 		CurrentVersion: CurrentVersion,
@@ -51,20 +52,31 @@ func GetInfo() UpdateInfo {
 
 // Check checks for updates from GitHub Releases API with memory caching.
 func Check(ctx context.Context, force bool) UpdateInfo {
-	mu.Lock()
-	defer mu.Unlock()
+	checkMu.Lock()
+	defer checkMu.Unlock()
 
-	if !force && !lastChecked.IsZero() && time.Since(lastChecked) < CacheTTL {
-		return cachedInfo
+	mu.RLock()
+	info, checked := cachedInfo, lastChecked
+	mu.RUnlock()
+	cacheTTL := CacheTTL
+	if info.CheckError != "" {
+		cacheTTL = time.Minute
 	}
-
-	info := UpdateInfo{
-		CurrentVersion: CurrentVersion,
-		LatestVersion:  CurrentVersion,
-		HasUpdate:      false,
-		ReleaseURL:     fmt.Sprintf("https://github.com/%s/%s/releases", RepoOwner, RepoName),
-		CheckedAt:      time.Now(),
+	if !force && !checked.IsZero() && time.Since(checked) < cacheTTL {
+		return info
 	}
+	info.CheckedAt = time.Now()
+	info.CheckError = ""
+	defer func() {
+		// Client cancellations should not poison the shared update cache.
+		if ctx.Err() != nil {
+			return
+		}
+		mu.Lock()
+		cachedInfo = info
+		lastChecked = time.Now()
+		mu.Unlock()
+	}()
 
 	reqCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
@@ -72,8 +84,6 @@ func Check(ctx context.Context, force bool) UpdateInfo {
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, GitHubAPIURL, nil)
 	if err != nil {
 		info.CheckError = err.Error()
-		cachedInfo = info
-		lastChecked = time.Now()
 		return info
 	}
 
@@ -83,16 +93,12 @@ func Check(ctx context.Context, force bool) UpdateInfo {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		info.CheckError = err.Error()
-		cachedInfo = info
-		lastChecked = time.Now()
 		return info
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		info.CheckError = fmt.Sprintf("GitHub API status %d", resp.StatusCode)
-		cachedInfo = info
-		lastChecked = time.Now()
 		return info
 	}
 
@@ -105,8 +111,6 @@ func Check(ctx context.Context, force bool) UpdateInfo {
 
 	if err := json.NewDecoder(resp.Body).Decode(&ghRelease); err != nil {
 		info.CheckError = err.Error()
-		cachedInfo = info
-		lastChecked = time.Now()
 		return info
 	}
 
@@ -119,8 +123,6 @@ func Check(ctx context.Context, force bool) UpdateInfo {
 		info.HasUpdate = IsNewerVersion(CurrentVersion, latestTag)
 	}
 
-	cachedInfo = info
-	lastChecked = time.Now()
 	return info
 }
 

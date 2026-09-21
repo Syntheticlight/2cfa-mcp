@@ -119,18 +119,22 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		log.Printf("[REQ] %s %s from %s [%s]", r.Method, sanitizedURI, clientIP, country)
 
 		cleanPath := strings.TrimRight(r.URL.Path, "/")
+		if strings.HasPrefix(cleanPath, "/mcp/") {
+			_, suffix, _ := strings.Cut(strings.TrimPrefix(cleanPath, "/mcp/"), "/")
+			cleanPath = "/" + suffix
+		}
 
 		// Direct routing for SSE stream:
 		// Handles: /sse, /sse/, /mcp/<TOKEN>/sse, /mcp/<TOKEN>/sse/
 		// Or any GET request requesting text/event-stream (e.g. ChatGPT connecting directly to /mcp/<TOKEN>)
-		if strings.HasSuffix(cleanPath, "/sse") || cleanPath == "/sse" ||
-			(r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept"), "text/event-stream") && !strings.Contains(cleanPath, "/message")) {
+		if cleanPath == "/sse" ||
+			(r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept"), "text/event-stream") && r.Header.Get("Mcp-Session-Id") == "" && (cleanPath == "" || cleanPath == "/" || cleanPath == "/mcp")) {
 			sseSrv.SSEHandler().ServeHTTP(w, r)
 			return
 		}
 
 		// Direct routing for SSE Message endpoint
-		if strings.Contains(cleanPath, "/message") {
+		if cleanPath == "/message" || cleanPath == "/messages" {
 			sseSrv.MessageHandler().ServeHTTP(w, r)
 			return
 		}

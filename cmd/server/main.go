@@ -67,11 +67,11 @@ func main() {
 	// Channel for signal handling
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(stopChan)
 
+	serverErrors := make(chan error, 1)
 	go func() {
-		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
-			log.Printf("[INFO] Server stopped: %v", err)
-		}
+		serverErrors <- srv.Start()
 	}()
 
 	// Non-blocking auto-check for updates from GitHub Releases
@@ -92,7 +92,14 @@ func main() {
 	fmt.Println(" Zero-Leakage:    Enabled (Strict secret masking in logs & /health)")
 	fmt.Println("==========================================================================")
 
-	<-stopChan
+	select {
+	case err := <-serverErrors:
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[FATAL] HTTP server failed: %v", err)
+		}
+		return
+	case <-stopChan:
+	}
 	log.Println("[INFO] Interrupt signal received, initiating graceful shutdown...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

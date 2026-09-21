@@ -54,7 +54,7 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			return mcp.NewToolResultError("argument 'path' is required"), nil
 		}
 
-		targetPath, err := security.SafePath(workspaceRoot, relPath)
+		root, targetPath, err := security.OpenWorkspacePath(workspaceRoot, relPath)
 		if err != nil {
 			gateMgr.AddAudit(gate.AuditEntry{
 				Timestamp:  time.Now(),
@@ -68,7 +68,8 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			return mcp.NewToolResultError(fmt.Sprintf("security violation: %v", err)), nil
 		}
 
-		file, err := os.Open(targetPath)
+		defer root.Close()
+		file, err := root.Open(targetPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return mcp.NewToolResultError(fmt.Sprintf("file not found: %s", relPath)), nil
@@ -156,7 +157,7 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			return mcp.NewToolResultError("argument 'content' is required"), nil
 		}
 
-		targetPath, err := security.SafePath(workspaceRoot, relPath)
+		root, targetPath, err := security.OpenWorkspacePath(workspaceRoot, relPath)
 		if err != nil {
 			gateMgr.AddAudit(gate.AuditEntry{
 				Timestamp:  time.Now(),
@@ -170,13 +171,14 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			return mcp.NewToolResultError(fmt.Sprintf("security violation: %v", err)), nil
 		}
 
+		defer root.Close()
 		// Ensure parent directory exists
 		parentDir := filepath.Dir(targetPath)
-		if err := os.MkdirAll(parentDir, 0755); err != nil {
+		if err := root.MkdirAll(parentDir, 0755); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create directory structure for '%s'", relPath)), nil
 		}
 
-		if err := os.WriteFile(targetPath, []byte(content), 0644); err != nil {
+		if err := root.WriteFile(targetPath, []byte(content), 0644); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to write file '%s': permission denied or disk error", relPath)), nil
 		}
 
@@ -227,7 +229,7 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 
 		relPath := request.GetString("path", "")
 
-		targetPath, err := security.SafePath(workspaceRoot, relPath)
+		root, targetPath, err := security.OpenWorkspacePath(workspaceRoot, relPath)
 		if err != nil {
 			gateMgr.AddAudit(gate.AuditEntry{
 				Timestamp:  time.Now(),
@@ -241,7 +243,8 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			return mcp.NewToolResultError(fmt.Sprintf("security violation: %v", err)), nil
 		}
 
-		dir, err := os.Open(targetPath)
+		defer root.Close()
+		dir, err := root.Open(targetPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return mcp.NewToolResultError(fmt.Sprintf("directory not found: %s", relPath)), nil

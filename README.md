@@ -66,6 +66,8 @@
 
 > 🧩 **结构化返回**：v1.0.10 起，全部工具都会向支持 MCP structured content 的客户端公开 `outputSchema`。成功结果同时包含机器可读 `structuredContent` 和人类可读文本，因此旧客户端仍兼容；例如 `execute_command` 会直接提供 `stdout`、`stderr`、`exit_code`、`duration_ms`、截断状态等字段。
 
+> **文件路径与超时行为**：文件工具通过 `os.Root` 在实际读写时限制工作区边界，防止符号链接在检查后被替换造成越界。支持指向工作区内部的相对符号链接；绝对符号链接会被拒绝，即使目标位于工作区内部。命令超时也会返回结构化的部分输出，并标记 `timed_out=true` 和 MCP 工具错误。
+
 ### 2. 可选 2FA 安全门禁工具（仅当你主动开启 2FA 时才需要）
 
 *如果你只是本地使用或局域网使用，以下 3 个工具完全可以忽略，平时不需要使用它们：*
@@ -266,6 +268,8 @@ https://xxx-xxx-xxx.trycloudflare.com
   -> ChatGPT 自动调用 `lock_gate()`，即刻撤销所有租约，断电物理上锁。
 - **关闭/重置 2FA**：启用 2FA 后属于安全管理操作，必须携带当前有效 `lease_token`，或额外验证当前 TOTP；单独持有 `AUTH_TOKEN` 无法关闭或替换第二因素。
 
+`duration_minutes` 必须是 `0` 到 `525600` 的整数；`0` 表示无时间过期。负数、小数或超出范围的值会报错，避免意外转换成永久租约。全局 `lock_gate()` 还会取消待确认的密钥配置；2FA 未启用时，锁门不会自动开启 2FA。
+
 ---
 
 ## 可视化安全控制台与健康审计
@@ -327,6 +331,8 @@ chmod +x scripts/daemon.sh
 3. Click **Save & Connect**. All 10 remote tools will be available immediately!
 
 All tools publish MCP `outputSchema` and return `structuredContent` plus a backward-compatible text fallback, so clients can consume stable JSON fields without scraping human-readable output.
+
+File tools perform operations through `os.Root` to prevent symlink traversal and replacement races. Relative symlinks within the workspace are supported; absolute symlinks are rejected. Command timeouts return structured partial output with `timed_out=true` and an MCP tool error. Lease durations must be whole minutes from 0 to 525600 (0 means no time expiry). A global lock also cancels pending 2FA setup; it does not enable a disabled gate.
 
 ---
 

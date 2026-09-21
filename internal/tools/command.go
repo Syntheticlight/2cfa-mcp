@@ -125,69 +125,39 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 		output := fmt.Sprintf("=== STDOUT ===\n%s\n=== STDERR ===\n%s", stdoutStr, stderrStr)
 		duration := time.Since(start).Milliseconds()
 
-		if execCtx.Err() == context.DeadlineExceeded {
-			gateMgr.AddAudit(gate.AuditEntry{
-				Timestamp:  time.Now(),
-				ClientIP:   ip,
-				Country:    country,
-				ToolName:   "execute_command",
-				DurationMs: duration,
-				Status:     "ERROR",
-				Message:    "Command timed out",
-			})
-			return mcp.NewToolResultError(fmt.Sprintf("command timed out after %v\nPartial Output:\n%s", timeout, output)), nil
-		}
-
-		if cmdErr != nil {
-			exitCode := -1
-			if exitErr, ok := cmdErr.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			}
-			gateMgr.AddAudit(gate.AuditEntry{
-				Timestamp:  time.Now(),
-				ClientIP:   ip,
-				Country:    country,
-				ToolName:   "execute_command",
-				DurationMs: duration,
-				Status:     "ERROR",
-				Message:    fmt.Sprintf("Exited with error: %v", cmdErr),
-			})
-			result := CommandOutput{
-				Success:         false,
-				Stdout:          rawStdout,
-				Stderr:          rawStderr,
-				ExitCode:        exitCode,
-				DurationMs:      duration,
-				TimedOut:        false,
-				StdoutTruncated: stdoutBuf.Truncated(),
-				StderrTruncated: stderrBuf.Truncated(),
-			}
-			return mcp.NewToolResultStructured(result, fmt.Sprintf("Command exited with status error: %v\n%s", cmdErr, output)), nil
-		}
-
-		gateMgr.AddAudit(gate.AuditEntry{
-			Timestamp:  time.Now(),
-			ClientIP:   ip,
-			Country:    country,
-			ToolName:   "execute_command",
-			DurationMs: duration,
-			Status:     "SUCCESS",
-			// Commands frequently contain credentials, URLs, or API keys.
-			// Keep audit metadata without retaining command arguments.
-			Message: "Command executed",
-		})
-
 		result := CommandOutput{
-			Success:         true,
+			Success:         cmdErr == nil,
 			Stdout:          rawStdout,
 			Stderr:          rawStderr,
-			ExitCode:        0,
 			DurationMs:      duration,
-			TimedOut:        false,
+			TimedOut:        execCtx.Err() == context.DeadlineExceeded,
 			StdoutTruncated: stdoutBuf.Truncated(),
 			StderrTruncated: stderrBuf.Truncated(),
 		}
-		return mcp.NewToolResultStructured(result, output), nil
+		status, auditMessage := "SUCCESS", "Command executed"
+		if cmdErr != nil {
+			result.ExitCode = -1
+			if cmd.ProcessState != nil {
+				result.ExitCode = cmd.ProcessState.ExitCode()
+			}
+			status = "ERROR"
+			auditMessage = fmt.Sprintf("Exited with error: %v", cmdErr)
+			output = fmt.Sprintf("Command exited with status error: %v\n%s", cmdErr, output)
+		}
+		if result.TimedOut {
+			result.Success = false
+			status, auditMessage = "ERROR", "Command timed out"
+			output = fmt.Sprintf("command timed out after %v\nPartial Output:\n%s", timeout, output)
+		}
+		gateMgr.AddAudit(gate.AuditEntry{
+			Timestamp: time.Now(), ClientIP: ip, Country: country,
+			ToolName: "execute_command", DurationMs: duration,
+			Status: status, Message: auditMessage,
+		})
+		response := mcp.NewToolResultStructured(result, output)
+		// Timeout/cancellation remain tool errors with structured partial output.
+		response.IsError = result.TimedOut || execCtx.Err() == context.Canceled
+		return response, nil
 	})
 }
 

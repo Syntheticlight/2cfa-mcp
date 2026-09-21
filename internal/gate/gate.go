@@ -49,12 +49,13 @@ type StateInfo struct {
 }
 
 const (
-	pendingSetupTTL        = 15 * time.Minute
-	totpFailureWindow      = 5 * time.Minute
-	totpClientFailureLimit = 5
-	totpGlobalFailureLimit = 25
-	totpUsedRetention      = 3 * time.Minute
-	maxActiveLeases        = 128
+	MaxLeaseDurationMinutes = 525600 // one year; checked before duration arithmetic
+	pendingSetupTTL         = 15 * time.Minute
+	totpFailureWindow       = 5 * time.Minute
+	totpClientFailureLimit  = 5
+	totpGlobalFailureLimit  = 25
+	totpUsedRetention       = 3 * time.Minute
+	maxActiveLeases         = 128
 )
 
 type totpAttemptState struct {
@@ -86,6 +87,14 @@ type Config struct {
 	EnvPath    string
 }
 
+// ManagementCredentials prove access to the current second factor. Verification
+// and the authorized mutation run under the same lock.
+type ManagementCredentials struct {
+	LeaseToken  string
+	CurrentCode string
+	ClientIP    string
+}
+
 // NewManager creates a Gate Manager instance.
 func NewManager(cfg Config) *Manager {
 	envPath := cfg.EnvPath
@@ -109,9 +118,12 @@ func NewManager(cfg Config) *Manager {
 
 // BeginSetup2FA initiates the 2FA setup process without locking the user out.
 // Generates or validates a Base32 secret and puts it in pending state.
-func (m *Manager) BeginSetup2FA(customSecret string) (string, error) {
+func (m *Manager) BeginSetup2FA(customSecret string, credentials ManagementCredentials) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.authorizeManagementLocked(credentials); err != nil {
+		return "", err
+	}
 
 	secret := strings.TrimSpace(customSecret)
 	isReset := strings.EqualFold(secret, "new") || strings.EqualFold(secret, "reset") || strings.EqualFold(secret, "regenerate")
@@ -128,7 +140,7 @@ func (m *Manager) BeginSetup2FA(customSecret string) (string, error) {
 		// If a setup was already initiated recently (within 15 minutes) and not yet confirmed,
 		// reuse the pending secret so that if the user/AI asks again or re-requests,
 		// the secret does not silently change under their feet!
-		if !isReset && m.pendingSecret != "" && time.Since(m.pendingAt) < 15*time.Minute {
+		if !isReset && m.pendingSecret != "" && time.Since(m.pendingAt) < pendingSetupTTL {
 			return m.pendingSecret, nil
 		}
 
@@ -209,9 +221,12 @@ func (m *Manager) ConfirmSetup2FA(code, clientIP, country string) (string, strin
 }
 
 // Disable2FA disables 2FA, revokes all leases, and updates .env.
-func (m *Manager) Disable2FA() error {
+func (m *Manager) Disable2FA(credentials ManagementCredentials) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.authorizeManagementLocked(credentials); err != nil {
+		return err
+	}
 
 	// Persist first so a disk/permission failure cannot create a fail-open
 	// mismatch where RAM says 2FA is disabled but restart behavior differs.
@@ -226,6 +241,7 @@ func (m *Manager) Disable2FA() error {
 
 	m.enabled = false
 	m.pendingSecret = ""
+	m.pendingAt = time.Time{}
 	m.leases = make(map[string]*Lease)
 	return nil
 }
@@ -370,25 +386,21 @@ func (m *Manager) validateLeaseLocked(token string, now time.Time) (bool, string
 	return false, "SECURITY GATE LOCKED: 2FA verification required. Please ask the user for their 6-digit Google Authenticator code, then invoke the 'unlock_gate' tool with the code to obtain a dynamic lease_token."
 }
 
-// AuthorizeManagement requires a valid active lease or a fresh current TOTP
-// before security-sensitive 2FA configuration can be changed.
-func (m *Manager) AuthorizeManagement(leaseToken, currentCode, clientKey string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+// authorizeManagementLocked must be called while holding m.mu for writing.
+func (m *Manager) authorizeManagementLocked(credentials ManagementCredentials) error {
 	if !m.enabled {
 		return nil
 	}
 
-	if allowed, _ := m.validateLeaseLocked(leaseToken, time.Now()); allowed {
+	if allowed, _ := m.validateLeaseLocked(credentials.LeaseToken, time.Now()); allowed {
 		return nil
 	}
 
-	if strings.TrimSpace(currentCode) == "" {
+	if strings.TrimSpace(credentials.CurrentCode) == "" {
 		return errors.New("2FA management requires a valid lease_token or current authenticator code")
 	}
 
-	valid, err := m.validateAndConsumeTOTPLocked(m.totpSecret, currentCode, clientKey)
+	valid, err := m.validateAndConsumeTOTPLocked(m.totpSecret, credentials.CurrentCode, credentials.ClientIP)
 	if err != nil {
 		return err
 	}
@@ -404,6 +416,9 @@ func (m *Manager) AuthorizeManagement(leaseToken, currentCode, clientKey string)
 func (m *Manager) CreateLease(code string, durationMinutes int, clientIP, country string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if durationMinutes < 0 || durationMinutes > MaxLeaseDurationMinutes {
+		return "", errors.New("lease duration must be between 0 and 525600 minutes")
+	}
 
 	if !m.enabled {
 		return "2fa_disabled", nil
@@ -474,6 +489,10 @@ func (m *Manager) Lock() {
 	defer m.mu.Unlock()
 
 	m.leases = make(map[string]*Lease)
+	// An emergency lock also cancels a pending rotation, otherwise its new
+	// secret could mint a fresh lease immediately after all leases were revoked.
+	m.pendingSecret = ""
+	m.pendingAt = time.Time{}
 }
 
 // purgeExpiredLeasesLocked cleans up expired leases from memory (caller must hold Lock).

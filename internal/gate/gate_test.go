@@ -132,7 +132,7 @@ func TestSetupLifecycleGeneratesSecretAndPersistsEnv(t *testing.T) {
 		EnvPath: envFile,
 	})
 
-	secret, err := mgr.BeginSetup2FA("")
+	secret, err := mgr.BeginSetup2FA("", ManagementCredentials{})
 	if err != nil {
 		t.Fatalf("unexpected setup error: %v", err)
 	}
@@ -147,7 +147,8 @@ func TestSetupLifecycleGeneratesSecretAndPersistsEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate setup code: %v", err)
 	}
-	if _, _, err := mgr.ConfirmSetup2FA(code, "127.0.0.1", "LOCAL"); err != nil {
+	_, lease, err := mgr.ConfirmSetup2FA(code, "127.0.0.1", "LOCAL")
+	if err != nil {
 		t.Fatalf("confirm setup: %v", err)
 	}
 
@@ -163,7 +164,7 @@ func TestSetupLifecycleGeneratesSecretAndPersistsEnv(t *testing.T) {
 		t.Errorf("expected .env to contain generated TOTP secret")
 	}
 
-	if err := mgr.Disable2FA(); err != nil {
+	if err := mgr.Disable2FA(ManagementCredentials{LeaseToken: lease}); err != nil {
 		t.Fatalf("unexpected error disabling 2FA: %v", err)
 	}
 	data, _ = os.ReadFile(envFile)
@@ -175,13 +176,13 @@ func TestPendingSecretReuseAndReset(t *testing.T) {
 	mgr := NewManager(Config{Enabled: false})
 
 	// 1. Initial begin setup -> generates Secret A
-	secA, err := mgr.BeginSetup2FA("")
+	secA, err := mgr.BeginSetup2FA("", ManagementCredentials{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// 2. Immediate re-call without code -> should return identical Secret A
-	secB, err := mgr.BeginSetup2FA("")
+	secB, err := mgr.BeginSetup2FA("", ManagementCredentials{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -190,7 +191,7 @@ func TestPendingSecretReuseAndReset(t *testing.T) {
 	}
 
 	// 3. Re-call with reset -> should generate a new Secret C
-	secC, err := mgr.BeginSetup2FA("reset")
+	secC, err := mgr.BeginSetup2FA("reset", ManagementCredentials{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -268,7 +269,7 @@ func TestConfirmSetupPersistFailureDoesNotChangeRuntimeState(t *testing.T) {
 		Enabled: false,
 		EnvPath: missingDirEnv,
 	})
-	if _, err := mgr.BeginSetup2FA(secret); err != nil {
+	if _, err := mgr.BeginSetup2FA(secret, ManagementCredentials{}); err != nil {
 		t.Fatalf("begin setup: %v", err)
 	}
 	code, err := GenerateCurrentTOTP(secret, time.Now())
