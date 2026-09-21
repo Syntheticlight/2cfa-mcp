@@ -49,7 +49,6 @@ func TestLoadDotEnvTightensFilePermissions(t *testing.T) {
 	}
 }
 
-
 func TestValidateSecurityConfigRejectsIncomplete2FA(t *testing.T) {
 	if err := validateSecurityConfig("", false, ""); err == nil {
 		t.Fatal("expected missing AUTH_TOKEN to be rejected")
