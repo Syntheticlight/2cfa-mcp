@@ -49,7 +49,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	}
 
 	mcpSrv := server.NewMCPServer(
-		"2cfa-mcp", "1.0.7",
+		"2cfa-mcp", "1.0.8",
 		server.WithDescription("High-security, low-memory remote MCP Server for edge devices"),
 	)
 

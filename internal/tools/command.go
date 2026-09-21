@@ -19,6 +19,7 @@ import (
 
 const (
 	DefaultExecTimeout = 120 * time.Second
+	MaxExecTimeout     = 7 * 24 * time.Hour
 	MaxOutputBytes     = 4 * 1024 * 1024 // 4 MB limit (protects LLM context window & RAM)
 )
 
@@ -32,7 +33,7 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 		mcp.WithDescription("Execute a shell command starting in the workspace with strict timeout and bounded captured output. The shell inherits the server process OS permissions and is not a filesystem sandbox."),
 		mcp.WithString("command", mcp.Required(), mcp.Description("The shell command to execute")),
 		mcp.WithString("work_dir", mcp.Description("Optional sub-directory relative to workspace root")),
-		mcp.WithNumber("timeout_seconds", mcp.Description("Optional execution timeout in seconds (e.g. 600 or 1800 for long tasks/downloads). Set -1 for unlimited")),
+		mcp.WithNumber("timeout_seconds", mcp.Description("Optional execution timeout in seconds (e.g. 600 or 1800 for long tasks/downloads). Positive values are capped at 7 days; set -1 for unlimited")),
 		mcp.WithString("lease_token", mcp.Description("Optional. Leave empty in normal use. Only pass if 2FA gate was explicitly turned on")),
 	)
 
@@ -79,6 +80,9 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 		timeout := defaultTimeout
 		tSec := request.GetFloat("timeout_seconds", 0)
 		if tSec > 0 {
+			if tSec > MaxExecTimeout.Seconds() {
+				return mcp.NewToolResultError(fmt.Sprintf("timeout_seconds exceeds maximum positive timeout of %.0f seconds (7 days); use -1 for unlimited", MaxExecTimeout.Seconds())), nil
+			}
 			timeout = time.Duration(tSec * float64(time.Second))
 		} else if tSec < 0 {
 			timeout = 0 // any negative value (e.g. -1) indicates unlimited execution
@@ -151,7 +155,9 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 			ToolName:   "execute_command",
 			DurationMs: duration,
 			Status:     "SUCCESS",
-			Message:    fmt.Sprintf("Command: %s", truncateStr(command, 50)),
+			// Commands frequently contain credentials, URLs, or API keys.
+			// Keep audit metadata without retaining command arguments.
+			Message: "Command executed",
 		})
 
 		return mcp.NewToolResultText(output), nil
@@ -200,13 +206,6 @@ func (b *cappedBuffer) String() string {
 
 func (b *cappedBuffer) Truncated() bool {
 	return b.truncated
-}
-
-func truncateStr(s string, maxLen int) string {
-	if len(s) > maxLen {
-		return s[:maxLen] + "..."
-	}
-	return s
 }
 
 // resolveShell returns the shell executable and argument flag appropriate for the host platform.

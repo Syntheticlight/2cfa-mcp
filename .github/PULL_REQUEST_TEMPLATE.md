@@ -18,6 +18,6 @@
 
 - [ ] I kept the change focused.
 - [ ] I added or updated tests when behavior changed.
-- [ ] `gofmt`, `go vet ./...`, and `go test ./...` pass.
+- [ ] `gofmt`, `go vet ./...`, and `go test -race ./...` pass.
 - [ ] `govulncheck ./...` passes.
 - [ ] I did not commit secrets, tokens, private keys, `.env` files, or generated binaries.

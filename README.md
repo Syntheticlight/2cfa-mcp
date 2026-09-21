@@ -55,11 +55,11 @@
 
 | 工具名称 | 主要功能 | 常用参数 |
 | :--- | :--- | :--- |
-| `execute_command` | 执行 Shell 命令（支持自定义长耗时任务与运行时有界输出捕获） | `command` (命令), `work_dir` (可选目录), `timeout_seconds` (可选超时秒数) |
+| `execute_command` | 执行 Shell 命令（支持自定义长耗时任务与运行时有界输出捕获） | `command` (命令), `work_dir` (可选目录), `timeout_seconds` (正数最多 7 天，`-1` 为无限) |
 | `read_file` | 读取工作区内指定文件（强制防路径穿越保护） | `path` (文件相对路径) |
 | `write_file` | 写入或覆盖工作区文件（自动递归创建父级目录） | `path` (文件相对路径), `content` (写入内容) |
-| `list_dir` | 结构化列出指定目录下的文件与文件夹 | `path` (可选目录路径，留空为根目录) |
-| `system_status` | 实时查看 CPU 核心、内存占用、运行时间及版本更新状态 | 无需任何参数 |
+| `list_dir` | 结构化列出指定目录下的文件与文件夹（单次最多返回 2000 项） | `path` (可选目录路径，留空为根目录) |
+| `system_status` | 查看 OS/架构、逻辑 CPU 数、Go 进程内存、运行时间及版本更新状态 | 无需任何参数 |
 | `check_update` | 检查 GitHub 是否有新版本发布与更新日志 | `force` (可选是否强制跳过缓存) |
 
 > ⚠️ **Shell 权限边界**：`work_dir` 只限制命令的**起始工作目录**。由于 `execute_command` 提供的是完整 Shell，它会继承 2cfa-mcp 进程本身的系统权限，并不是 chroot/bwrap 级文件系统沙箱。真正需要只读/只写 workspace 时，请优先使用 `read_file` / `write_file` / `list_dir`，这些工具会执行路径穿越与符号链接逃逸检查。
@@ -121,6 +121,8 @@ TOTP_SECRET=
 > ⚠️ **升级说明**：如果你是从 `v1.0.4` 或更早版本升级，建议先执行 `git pull`（或重新克隆仓库）再运行 `./scripts/daemon.sh update`。旧版 `daemon.sh` 只会替换二进制，不会自动更新自身，因此拿不到 v1.0.5+ 新增的 argv 脱敏、日志轮转和 SHA-256 校验逻辑。
 
 > 🛡️ **v1.0.7 安全加固**：SSE 长连接不再受全局写超时影响；显式系统环境变量优先于 `.env`；CI/Release 会执行 `govulncheck ./...`；最低 Go 工具链提升到包含标准库安全修复的 1.26.8，并将 `golang.org/x/text` 升级到已修复 GO-2026-5970 的版本。
+
+> 🛡️ **v1.0.8 开源加固**：Release 构建与发布写权限隔离；CI 增加 Go race detector；`.env` 启动时收紧到 `0600`；命令审计不再保存命令参数；活动 lease 数量有界；目录列表和正数执行超时增加上限；Dashboard 增加 no-referrer/no-store/CSP 等浏览器安全头。
 
 项目自带高可用 Supervisor 脚本，支持进程自愈重启与 Termux 唤醒锁防休眠：
 ```bash
@@ -216,7 +218,7 @@ https://xxx-xxx-xxx.trycloudflare.com
 
 ### 1. 默认状态（开箱直接使用）
 > **用户**：“帮我查看当前设备的系统负载和内存状态。”  
-> **ChatGPT**：*（调用 `system_status`）* 当前 CPU 使用率 3%，常驻内存使用 12.8MB，系统运行正常。
+> **ChatGPT**：*（调用 `system_status`）* 当前系统为 Linux/arm64，逻辑 CPU 8 核，Go 进程已分配内存 12.8MB，服务运行正常。
 
 > **用户**：“在 workspace 下创建一个 notes.md 文件，写入今天的备忘内容。”  
 > **ChatGPT**：*（调用 `write_file`）* 文件已安全写入 `workspace/notes.md`。
@@ -272,8 +274,8 @@ https://<你的穿透域名>/gate?token=<你的AUTH_TOKEN>
 ```
 提供现代暗色高科技仪表盘，实时显示：
 - 当前 2FA 门禁开关状态
-- 活跃租约通行证清单与倒计时
-- 最近请求审计流水与 Cloudflare 真实穿透 IP（含 `CF-IPCountry` 地理归属与客户端 User-Agent）
+- 活跃租约数量与门禁状态
+- 最近请求审计流水与可信代理解析后的客户端 IP / 国家信息
 - 网页端一键应急物理锁闸
 
 ---

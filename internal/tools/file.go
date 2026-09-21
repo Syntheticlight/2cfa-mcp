@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,10 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-const MaxReadFileBytes = 10 * 1024 * 1024 // 10 MB limit for single file read
+const (
+	MaxReadFileBytes  = 10 * 1024 * 1024 // 10 MB limit for single file read
+	MaxListDirEntries = 2000             // bound directory listing output and memory
+)
 
 // RegisterFileTools registers read_file, write_file, and list_dir tools to MCP server.
 func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.Manager) {
@@ -213,12 +217,22 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			return mcp.NewToolResultError(fmt.Sprintf("security violation: %v", err)), nil
 		}
 
-		entries, err := os.ReadDir(targetPath)
+		dir, err := os.Open(targetPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return mcp.NewToolResultError(fmt.Sprintf("directory not found: %s", relPath)), nil
 			}
+			return mcp.NewToolResultError(fmt.Sprintf("failed to open directory: %s", relPath)), nil
+		}
+		defer dir.Close()
+
+		entries, err := dir.ReadDir(MaxListDirEntries + 1)
+		if err != nil && err != io.EOF {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to read directory: %s", relPath)), nil
+		}
+		truncated := len(entries) > MaxListDirEntries
+		if truncated {
+			entries = entries[:MaxListDirEntries]
 		}
 
 		var sb strings.Builder
@@ -241,6 +255,9 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 
 			sb.WriteString(fmt.Sprintf("%-30s %-10s %-12s %s\n",
 				entry.Name(), entryType, sizeStr, info.ModTime().Format("2006-01-02 15:04:05")))
+		}
+		if truncated {
+			sb.WriteString(fmt.Sprintf("\n... [listing truncated after %d entries]\n", MaxListDirEntries))
 		}
 
 		gateMgr.AddAudit(gate.AuditEntry{

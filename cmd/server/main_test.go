@@ -28,3 +28,23 @@ func TestLoadDotEnvPreservesExistingEnvironment(t *testing.T) {
 		t.Fatalf("missing environment variable should be loaded from .env, got %q", got)
 	}
 }
+
+func TestLoadDotEnvTightensFilePermissions(t *testing.T) {
+	tmp := t.TempDir()
+	envFile := filepath.Join(tmp, ".env")
+	if err := os.WriteFile(envFile, []byte("PERMISSION_TEST=value\n"), 0644); err != nil {
+		t.Fatalf("write test env: %v", err)
+	}
+	_ = os.Unsetenv("PERMISSION_TEST")
+	t.Cleanup(func() { _ = os.Unsetenv("PERMISSION_TEST") })
+
+	loadDotEnv(envFile)
+
+	info, err := os.Stat(envFile)
+	if err != nil {
+		t.Fatalf("stat env file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("expected .env permissions 0600 after load, got %04o", got)
+	}
+}
