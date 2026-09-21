@@ -29,7 +29,6 @@ func TestLoadDotEnvPreservesExistingEnvironment(t *testing.T) {
 	}
 }
 
-
 func TestLoadDotEnvTightensFilePermissions(t *testing.T) {
 	tmp := t.TempDir()
 	envFile := filepath.Join(tmp, ".env")
