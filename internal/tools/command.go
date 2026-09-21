@@ -157,7 +157,7 @@ func RegisterCommandTool(s *server.MCPServer, workspaceRoot string, defaultTimeo
 			Status:     "SUCCESS",
 			// Commands frequently contain credentials, URLs, or API keys.
 			// Keep audit metadata without retaining command arguments.
-			Message:    "Command executed",
+			Message: "Command executed",
 		})
 
 		return mcp.NewToolResultText(output), nil
