@@ -3,6 +3,8 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -94,14 +96,30 @@ func TestAuthenticate(t *testing.T) {
 
 func TestSanitizeURL(t *testing.T) {
 	token := "secret123"
-	url := "/mcp/secret123/sse?token=secret123"
-	sanitized := SanitizeURL(url, token)
+	rawURI := "/mcp/secret123/sse?token=secret123"
+	sanitized := SanitizeURL(rawURI, token)
 
-	if sanitized == url {
+	if sanitized == rawURI {
 		t.Errorf("failed to sanitize token from URL")
 	}
 	if sanitized != "/mcp/[REDACTED]/sse?token=[REDACTED]" {
 		t.Errorf("unexpected sanitized output: %s", sanitized)
+	}
+}
+
+func TestSanitizeURLHandlesEncodedToken(t *testing.T) {
+	token := "secret+value%42"
+	rawURI := "/mcp/" + url.PathEscape(token) + "/sse?mode=test&token=" + url.QueryEscape(token)
+	sanitized := SanitizeURL(rawURI, token)
+
+	if strings.Contains(sanitized, token) ||
+		strings.Contains(sanitized, url.PathEscape(token)) ||
+		strings.Contains(sanitized, url.QueryEscape(token)) {
+		t.Fatalf("encoded token leaked after sanitization: %s", sanitized)
+	}
+	if !strings.Contains(sanitized, "/mcp/[REDACTED]/sse") ||
+		!strings.Contains(sanitized, "token=[REDACTED]") {
+		t.Fatalf("expected structural redaction, got: %s", sanitized)
 	}
 }
 
