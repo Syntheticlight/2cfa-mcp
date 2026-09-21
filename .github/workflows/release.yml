@@ -9,18 +9,21 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, e.g. v1.0.7"
+        description: "Release tag, e.g. v1.0.8"
         required: true
-        default: "v1.0.7"
+        default: "v1.0.8"
 
+# Validation/build jobs are read-only. Only the final publishing job receives
+# contents:write, and it never checks out or executes repository code.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  validate-build:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      exists: ${{ steps.version.outputs.exists }}
 
     steps:
       - name: Checkout
@@ -48,14 +51,17 @@ jobs:
             exit 1
           }
 
-          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
-          if gh release view "${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+          HTTP_CODE=$(curl -sSL -o /dev/null -w "%{http_code}"             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}" || true)
+          if [ "${HTTP_CODE}" = "200" ]; then
             echo "exists=true" >> "${GITHUB_OUTPUT}"
             echo "Release ${VERSION} already exists; nothing to publish."
           else
             echo "exists=false" >> "${GITHUB_OUTPUT}"
+            if [ "${HTTP_CODE}" != "404" ]; then
+              echo "Release existence check returned HTTP ${HTTP_CODE}; continuing with validation."
+            fi
           fi
 
       - name: Set up Go
@@ -92,12 +98,38 @@ jobs:
             sha256sum 2cfa-mcp-* > SHA256SUMS
           )
 
-      - name: Create GitHub release
+      - name: Stage release artifact
         if: steps.version.outputs.exists != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.version.outputs.version }}
+          path: build/*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: validate-build
+    if: needs.validate-build.outputs.exists != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download validated release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.validate-build.outputs.version }}
+          path: dist
+
+      - name: Create GitHub release
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate-build.outputs.version }}
         run: |
-          gh release create "${VERSION}" build/* \
-            --repo "${GITHUB_REPOSITORY}" \
-            --target "${GITHUB_SHA}" \
-            --title "${VERSION}" \
-            --generate-notes
+          if gh release view "${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${VERSION} already exists; nothing to publish."
+            exit 0
+          fi
+
+          gh release create "${VERSION}" dist/*             --repo "${GITHUB_REPOSITORY}"             --target "${GITHUB_SHA}"             --title "${VERSION}"             --generate-notes
