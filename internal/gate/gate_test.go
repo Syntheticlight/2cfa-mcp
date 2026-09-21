@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -271,5 +272,32 @@ func TestConfigure2FAPersistFailureDoesNotChangeRuntimeState(t *testing.T) {
 	}
 	if mgr.GetSecret() != "" {
 		t.Fatal("TOTP secret must not be committed to runtime state when persistence fails")
+	}
+}
+
+
+func TestLeaseLimitEvictsOldest(t *testing.T) {
+	mgr := NewManager(Config{Enabled: true, TOTPSecret: "JBSWY3DPEHPK3PXP"})
+	base := time.Now().Add(-time.Hour)
+
+	for i := 0; i < maxActiveLeases; i++ {
+		token := fmt.Sprintf("lease-%03d", i)
+		mgr.leases[token] = &Lease{
+			Token:     token,
+			CreatedAt: base.Add(time.Duration(i) * time.Second),
+		}
+	}
+
+	mgr.enforceLeaseLimitLocked()
+	mgr.leases["lease-new"] = &Lease{Token: "lease-new", CreatedAt: time.Now()}
+
+	if got := len(mgr.leases); got != maxActiveLeases {
+		t.Fatalf("expected at most %d active leases, got %d", maxActiveLeases, got)
+	}
+	if _, exists := mgr.leases["lease-000"]; exists {
+		t.Fatal("expected oldest lease to be evicted")
+	}
+	if _, exists := mgr.leases["lease-new"]; !exists {
+		t.Fatal("expected newest lease to be retained")
 	}
 }
