@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, e.g. v1.0.8"
+        description: "Release tag, e.g. v1.0.9"
         required: true
-        default: "v1.0.8"
+        default: "v1.0.9"
 
 # Validation/build jobs are read-only. Only the final publishing job receives
 # contents:write, and it never checks out or executes repository code.
@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Resolve version
         id: version
@@ -66,14 +66,14 @@ jobs:
 
       - name: Set up Go
         if: steps.version.outputs.exists != 'true'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Test
         if: steps.version.outputs.exists != 'true'
-        run: go test ./...
+        run: go test -race ./...
 
       - name: Govulncheck
         if: steps.version.outputs.exists != 'true'
@@ -100,7 +100,7 @@ jobs:
 
       - name: Stage release artifact
         if: steps.version.outputs.exists != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-${{ steps.version.outputs.version }}
           path: build/*
@@ -116,7 +116,7 @@ jobs:
 
     steps:
       - name: Download validated release artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-${{ needs.validate-build.outputs.version }}
           path: dist
