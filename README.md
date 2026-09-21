@@ -134,6 +134,8 @@ TOTP_SECRET=
 
 > 🧩 **v1.0.10 结构化输出升级**：全部 10 个 MCP 工具声明标准 `outputSchema`，成功调用同时返回 `structuredContent` 与原有文本 fallback。ChatGPT/Agent 可直接读取稳定 JSON 字段，不再依赖解析自然语言文本；服务端同时启用 output schema 运行时校验。
 
+> 🛡️ **v1.0.11 运行时与安全加固**：工作区文件操作引入 `os.Root` 目录隔离，防止外部软链接逃逸与检查-使用竞态；2FA 管理操作同一锁内原子校验并支持配置变更后立即注销待确认密钥；严格校验租约有效时长；优化 HTTP 传输层路由与版本更新并发检查。
+
 项目自带高可用 Supervisor 脚本，支持进程自愈重启与 Termux 唤醒锁防休眠：
 ```bash
 chmod +x scripts/daemon.sh
