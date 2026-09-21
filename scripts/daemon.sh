@@ -60,7 +60,28 @@ fi
 
 LOG_FILE="${ROOT_DIR}/2cfa-mcp.log"
 PID_FILE="${ROOT_DIR}/2cfa-mcp.pid"
+SERVER_PID_FILE="${ROOT_DIR}/2cfa-mcp.server.pid"
 MAX_LOG_BYTES="${MAX_LOG_BYTES:-10485760}" # 10 MiB, keep one rotated copy
+
+pid_matches() {
+    local pid="${1:-}"
+    local marker="${2:-}"
+    [ -n "${pid}" ] || return 1
+    kill -0 "${pid}" 2>/dev/null || return 1
+
+    # Guard against stale PID-file reuse when ps can expose command arguments.
+    if command -v ps >/dev/null 2>&1; then
+        local args
+        args=$(ps -p "${pid}" -o args= 2>/dev/null || true)
+        if [ -n "${args}" ]; then
+            case "${args}" in
+                *"${marker}"*) return 0 ;;
+                *) return 1 ;;
+            esac
+        fi
+    fi
+    return 0
+}
 
 rotate_log_if_needed() {
     [ -f "${LOG_FILE}" ] || return 0
@@ -72,25 +93,42 @@ rotate_log_if_needed() {
 }
 
 start_supervisor_loop() {
+    local SERVER_PID=""
+
+    cleanup_supervisor() {
+        trap - INT TERM EXIT
+        if [ -n "${SERVER_PID}" ] && pid_matches "${SERVER_PID}" "2cfa-mcp"; then
+            kill "${SERVER_PID}" 2>/dev/null || true
+            wait "${SERVER_PID}" 2>/dev/null || true
+        fi
+        rm -f "${SERVER_PID_FILE}"
+
+        if command -v termux-wake-unlock >/dev/null 2>&1; then
+            termux-wake-unlock 2>/dev/null || true
+        fi
+    }
+
+    trap 'cleanup_supervisor; exit 0' INT TERM
+    trap cleanup_supervisor EXIT
+
     if command -v termux-wake-lock >/dev/null 2>&1; then
         echo "[INFO] Termux detected! Acquiring wake-lock to prevent CPU sleep..." >> "${LOG_FILE}"
         termux-wake-lock
     fi
 
     while true; do
-        # Dynamically reload .env on every restart iteration so 2FA changes take effect immediately
+        # Dynamically reload .env on every restart iteration so 2FA changes take effect immediately.
+        # Secrets stay in the environment/.env and are never placed in argv.
         load_env
         echo "[INFO] Starting 2cfa-mcp server instance at $(date)..." >> "${LOG_FILE}"
 
-        # Do NOT pass -2fa or -totp-secret flags: binary natively loads .env as single source of truth!
-        # AUTH_TOKEN stays in the environment; never place secrets in argv where
-        # they can be exposed through ps or /proc/<pid>/cmdline.
         rotate_log_if_needed
         "${BINARY}" \
             -port="${PORT:-2232}" \
             -workspace="${WORKSPACE_PATH:-${ROOT_DIR}/workspace}" \
             -timeout="${EXEC_TIMEOUT:-120}" >> "${LOG_FILE}" 2>&1 &
         SERVER_PID=$!
+        echo "${SERVER_PID}" > "${SERVER_PID_FILE}"
 
         # Keep long-running installations from growing a single log forever.
         while kill -0 "${SERVER_PID}" 2>/dev/null; do
@@ -98,6 +136,8 @@ start_supervisor_loop() {
             rotate_log_if_needed
         done
         wait "${SERVER_PID}" 2>/dev/null || true
+        rm -f "${SERVER_PID_FILE}"
+        SERVER_PID=""
 
         echo "[WARNING] Server crashed or stopped. Restarting in 3 seconds..." >> "${LOG_FILE}"
         sleep 3
@@ -133,12 +173,26 @@ case "$1" in
     stop)
         if [ -f "${PID_FILE}" ]; then
             SPID=$(cat "${PID_FILE}" 2>/dev/null || true)
-            if [ -n "${SPID}" ]; then
+            if pid_matches "${SPID}" "daemon.sh run-supervisor"; then
                 kill "${SPID}" 2>/dev/null || true
+                # Give the supervisor trap a moment to terminate its exact child.
+                for _ in 1 2 3 4 5 6 7 8 9 10; do
+                    kill -0 "${SPID}" 2>/dev/null || break
+                    sleep 0.2
+                done
             fi
             rm -f "${PID_FILE}"
         fi
-        pkill -f "2cfa-mcp" || true
+
+        # Fallback for a stale/missing supervisor PID file: terminate only the
+        # exact server PID recorded by the supervisor, never a broad pkill.
+        if [ -f "${SERVER_PID_FILE}" ]; then
+            SERVER_PID=$(cat "${SERVER_PID_FILE}" 2>/dev/null || true)
+            if pid_matches "${SERVER_PID}" "2cfa-mcp"; then
+                kill "${SERVER_PID}" 2>/dev/null || true
+            fi
+            rm -f "${SERVER_PID_FILE}"
+        fi
 
         if command -v termux-wake-unlock >/dev/null 2>&1; then
             echo "[INFO] Releasing Termux wake-lock..."
@@ -150,16 +204,18 @@ case "$1" in
         IS_RUNNING=false
         if [ -f "${PID_FILE}" ]; then
             SPID=$(cat "${PID_FILE}" 2>/dev/null || true)
-            if [ -n "${SPID}" ] && kill -0 "${SPID}" 2>/dev/null; then
+            if pid_matches "${SPID}" "daemon.sh run-supervisor"; then
                 IS_RUNNING=true
                 echo "[STATUS] 2cfa-mcp Supervisor is RUNNING (PID: ${SPID})"
             fi
         fi
 
-        PROC_PIDS=$(pgrep -f "2cfa-mcp" 2>/dev/null | tr '\n' ' ' || true)
-        if [ -n "${PROC_PIDS}" ]; then
-            IS_RUNNING=true
-            echo "[STATUS] 2cfa-mcp Processes: ${PROC_PIDS}"
+        if [ -f "${SERVER_PID_FILE}" ]; then
+            SERVER_PID=$(cat "${SERVER_PID_FILE}" 2>/dev/null || true)
+            if pid_matches "${SERVER_PID}" "2cfa-mcp"; then
+                IS_RUNNING=true
+                echo "[STATUS] 2cfa-mcp Server is RUNNING (PID: ${SERVER_PID})"
+            fi
         fi
 
         if [ "${IS_RUNNING}" = false ]; then
