@@ -392,3 +392,37 @@ func TestListDirTruncatesLargeDirectories(t *testing.T) {
 		t.Fatal("expected large directory listing to be truncated")
 	}
 }
+
+
+func TestReadFileRejectsOversizedContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "large.bin")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create oversized file: %v", err)
+	}
+	if err := file.Truncate(int64(MaxReadFileBytes) + 1); err != nil {
+		_ = file.Close()
+		t.Fatalf("truncate oversized file: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close oversized file: %v", err)
+	}
+
+	gateMgr := gate.NewManager(gate.Config{Enabled: false})
+	mcpSrv := server.NewMCPServer("test-read-limit", "1.0.0")
+	RegisterFileTools(mcpSrv, tmpDir, gateMgr)
+
+	tool := mcpSrv.GetTool("read_file")
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "read_file"
+	req.Params.Arguments = map[string]any{"path": "large.bin"}
+
+	res, err := tool.Handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected oversized file read to be rejected")
+	}
+}
