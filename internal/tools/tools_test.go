@@ -206,6 +206,7 @@ func TestResolveShell(t *testing.T) {
 }
 
 func TestSetup2FAValidation(t *testing.T) {
+	secret := "JBSWY3DPEHPK3PXP"
 	gateMgr := gate.NewManager(gate.Config{Enabled: false})
 	mcpSrv := server.NewMCPServer("test", "1.0.0")
 	RegisterGateTools(mcpSrv, gateMgr)
