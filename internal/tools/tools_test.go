@@ -2,6 +2,9 @@ package tools
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -305,5 +308,88 @@ func TestCappedBufferBoundedMemory(t *testing.T) {
 	}
 	if !buf.Truncated() {
 		t.Fatal("expected buffer to report truncation")
+	}
+}
+
+
+func TestCommandAuditRedactsArguments(t *testing.T) {
+	tmpDir := t.TempDir()
+	gateMgr := gate.NewManager(gate.Config{Enabled: false})
+	mcpSrv := server.NewMCPServer("test-audit", "1.0.0")
+	RegisterCommandTool(mcpSrv, tmpDir, 5*time.Second, gateMgr)
+
+	tool := mcpSrv.GetTool("execute_command")
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "execute_command"
+	req.Params.Arguments = map[string]any{
+		"command": "echo secret-value-should-not-be-audited",
+	}
+
+	res, err := tool.Handler(context.Background(), req)
+	if err != nil || res.IsError {
+		t.Fatalf("command failed: err=%v res=%+v", err, res)
+	}
+
+	audits := gateMgr.GetAudits()
+	if len(audits) == 0 {
+		t.Fatal("expected command audit entry")
+	}
+	msg := audits[0].Message
+	if strings.Contains(msg, "secret-value-should-not-be-audited") || strings.Contains(msg, "echo ") {
+		t.Fatalf("command arguments leaked into audit message: %q", msg)
+	}
+	if msg != "Command executed" {
+		t.Fatalf("unexpected redacted audit message: %q", msg)
+	}
+}
+
+func TestCommandRejectsExcessivePositiveTimeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	gateMgr := gate.NewManager(gate.Config{Enabled: false})
+	mcpSrv := server.NewMCPServer("test-timeout", "1.0.0")
+	RegisterCommandTool(mcpSrv, tmpDir, 5*time.Second, gateMgr)
+
+	tool := mcpSrv.GetTool("execute_command")
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "execute_command"
+	req.Params.Arguments = map[string]any{
+		"command":         "echo should-not-run",
+		"timeout_seconds": MaxExecTimeout.Seconds() + 1,
+	}
+
+	res, err := tool.Handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected excessive timeout to be rejected")
+	}
+}
+
+func TestListDirTruncatesLargeDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+	for i := 0; i < MaxListDirEntries+1; i++ {
+		name := filepath.Join(tmpDir, fmt.Sprintf("f-%04d.txt", i))
+		if err := os.WriteFile(name, []byte("x"), 0600); err != nil {
+			t.Fatalf("create test file %d: %v", i, err)
+		}
+	}
+
+	gateMgr := gate.NewManager(gate.Config{Enabled: false})
+	mcpSrv := server.NewMCPServer("test-list", "1.0.0")
+	RegisterFileTools(mcpSrv, tmpDir, gateMgr)
+
+	tool := mcpSrv.GetTool("list_dir")
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "list_dir"
+	req.Params.Arguments = map[string]any{"path": ""}
+
+	res, err := tool.Handler(context.Background(), req)
+	if err != nil || res.IsError {
+		t.Fatalf("list_dir failed: err=%v res=%+v", err, res)
+	}
+	text := res.Content[0].(mcp.TextContent).Text
+	if !strings.Contains(text, "listing truncated after") {
+		t.Fatal("expected large directory listing to be truncated")
 	}
 }
