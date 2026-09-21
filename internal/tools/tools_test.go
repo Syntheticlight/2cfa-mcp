@@ -429,7 +429,6 @@ func TestReadFileRejectsOversizedContent(t *testing.T) {
 	}
 }
 
-
 func TestAllToolsDeclareOutputSchemas(t *testing.T) {
 	tmpDir := t.TempDir()
 	gateMgr := gate.NewManager(gate.Config{Enabled: false})
