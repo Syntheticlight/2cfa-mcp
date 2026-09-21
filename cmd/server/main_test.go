@@ -48,3 +48,19 @@ func TestLoadDotEnvTightensFilePermissions(t *testing.T) {
 		t.Fatalf("expected .env permissions 0600 after load, got %04o", got)
 	}
 }
+
+
+func TestValidateSecurityConfigRejectsIncomplete2FA(t *testing.T) {
+	if err := validateSecurityConfig("", false, ""); err == nil {
+		t.Fatal("expected missing AUTH_TOKEN to be rejected")
+	}
+	if err := validateSecurityConfig("token", true, ""); err == nil {
+		t.Fatal("expected enabled 2FA without TOTP_SECRET to be rejected")
+	}
+	if err := validateSecurityConfig("token", false, ""); err != nil {
+		t.Fatalf("disabled 2FA should not require a TOTP secret: %v", err)
+	}
+	if err := validateSecurityConfig("token", true, "JBSWY3DPEHPK3PXP"); err != nil {
+		t.Fatalf("complete 2FA configuration should be accepted: %v", err)
+	}
+}
