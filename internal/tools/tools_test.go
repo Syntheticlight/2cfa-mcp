@@ -215,7 +215,10 @@ func TestSetup2FAValidation(t *testing.T) {
 	// 1. Step 1: Initiate without secret -> Auto-generates secret in pending state
 	reqNoSecret := mcp.CallToolRequest{}
 	reqNoSecret.Params.Name = "setup_2fa"
-	reqNoSecret.Params.Arguments = map[string]any{"enable": true}
+	reqNoSecret.Params.Arguments = map[string]any{
+		"enable": true,
+		"secret": secret,
+	}
 
 	res, err := setupTool.Handler(context.Background(), reqNoSecret)
 	if err != nil || res.IsError {
@@ -237,8 +240,7 @@ func TestSetup2FAValidation(t *testing.T) {
 	}
 
 	// 3. Step 2: Confirm with valid code -> Must succeed and activate 2FA
-	pendingSec := gateMgr.GetPendingSecret()
-	validCode, _ := generateTestTOTP(pendingSec)
+	validCode, _ := generateTestTOTP(secret)
 	reqValidCode := mcp.CallToolRequest{}
 	reqValidCode.Params.Name = "setup_2fa"
 	reqValidCode.Params.Arguments = map[string]any{"enable": true, "code": validCode}
