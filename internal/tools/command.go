@@ -208,13 +208,6 @@ func (b *cappedBuffer) Truncated() bool {
 	return b.truncated
 }
 
-func truncateStr(s string, maxLen int) string {
-	if len(s) > maxLen {
-		return s[:maxLen] + "..."
-	}
-	return s
-}
-
 // resolveShell returns the shell executable and argument flag appropriate for the host platform.
 // It prioritizes absolute paths to prevent Go's os/exec from invoking LookPath, which on modern Go
 // uses faccessat2 — a system call blocked by seccomp on certain Android kernels (e.g. OnePlus 9R)
