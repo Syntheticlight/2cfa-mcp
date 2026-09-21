@@ -23,6 +23,7 @@ func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
 		mcp.WithString("secret", mcp.Description("Optional custom Base32 secret string. If omitted, a secure secret is automatically generated")),
 		mcp.WithString("current_code", mcp.Description("Required only when changing/disabling an already-enabled 2FA gate and no valid lease_token is available")),
 		mcp.WithString("lease_token", mcp.Description("Existing valid lease used to authorize disabling or reconfiguring an already-enabled 2FA gate")),
+		mcp.WithOutputSchema[Setup2FAOutput](),
 	)
 
 	s.AddTool(setupTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -45,7 +46,15 @@ func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
 			if err := gateMgr.Disable2FA(); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to disable 2FA: %v", err)), nil
 			}
-			return mcp.NewToolResultText("2FA Gate has been DISABLED. The server is now in default Token-only direct mode (no 2FA required)."), nil
+			message := "2FA Gate has been DISABLED. The server is now in default Token-only direct mode (no 2FA required)."
+			result := Setup2FAOutput{
+				Success: true,
+				Action:  "disabled",
+				Enabled: false,
+				Status:  "DISABLED",
+				Message: message,
+			}
+			return mcp.NewToolResultStructured(result, message), nil
 		}
 
 		// If 2FA is already active and the caller didn't provide a code or a custom/reset secret:
@@ -59,7 +68,14 @@ Current Status: %s
 - To TURN OFF 2FA: call setup_2fa(enable=false, lease_token="<active-lease>") or provide current_code
 - To RECONFIGURE with a new key: call setup_2fa(enable=true, secret="reset", lease_token="<active-lease>")`,
 				state.Status)
-			return mcp.NewToolResultText(msg), nil
+			result := Setup2FAOutput{
+				Success: true,
+				Action:  "status",
+				Enabled: true,
+				Status:  state.Status,
+				Message: "2FA is already enabled and active.",
+			}
+			return mcp.NewToolResultStructured(result, msg), nil
 		}
 
 		// Stage 2: Code provided -> Verify, activate, and persist!
@@ -89,7 +105,15 @@ Dynamic Lease Token: %s (Auto-unlocked for this session)
 				Message:    "2FA confirmed and activated via TOTP verification",
 			})
 
-			return mcp.NewToolResultText(msg), nil
+			result := Setup2FAOutput{
+				Success:    true,
+				Action:     "activated",
+				Enabled:    true,
+				Status:     "UNLOCKED",
+				Message:    "2FA verified, activated, and persisted.",
+				LeaseToken: sessionLease,
+			}
+			return mcp.NewToolResultStructured(result, msg), nil
 		}
 
 		// Stage 1: No code provided -> Initiate setup, generate secret, and prompt user for confirmation code.
@@ -134,7 +158,18 @@ OTP Auth URI:  %s
 3. Call setup_2fa(enable=true, code="<6-digit-code>") to confirm and permanently activate 2FA.`,
 			pendingSecret, otpauthURI, qrSection)
 
-		return mcp.NewToolResultText(msg), nil
+		state := gateMgr.GetState()
+		result := Setup2FAOutput{
+			Success:    true,
+			Action:     "pending_verification",
+			Enabled:    state.Enabled,
+			Status:     state.Status,
+			Message:    "2FA setup is pending verification with a 6-digit TOTP code.",
+			Secret:     pendingSecret,
+			OTPAuthURI: otpauthURI,
+			QRCode:     qrBlock,
+		}
+		return mcp.NewToolResultStructured(result, msg), nil
 	})
 
 	// 2. unlock_gate: Unlock with optional duration (0 = never expires)
@@ -142,6 +177,7 @@ OTP Auth URI:  %s
 		mcp.WithDescription("Unlock the 2FA security gate using a 6-digit Google Authenticator code. Generates a dynamic bearer lease_token. By default it has no time expiry and remains valid until explicit lock/revocation, 2FA rotation/disable, or server restart."),
 		mcp.WithString("code", mcp.Required(), mcp.Description("The 6-digit TOTP verification code from Google Authenticator")),
 		mcp.WithNumber("duration_minutes", mcp.Description("Optional validity period in minutes. Default 0 means no time expiry; the lease is not cryptographically bound to a chat conversation.")),
+		mcp.WithOutputSchema[UnlockGateOutput](),
 	)
 
 	s.AddTool(unlockTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -149,7 +185,16 @@ OTP Auth URI:  %s
 		ip, country := resolveHeaderIP(request.Header)
 
 		if !gateMgr.GetState().Enabled {
-			return mcp.NewToolResultText("2FA Security Gate is currently DISABLED. The server is operating in default direct token mode. All tools are already 100% unlocked and available without 2FA."), nil
+			message := "2FA Security Gate is currently DISABLED. The server is operating in default direct token mode. All tools are already 100% unlocked and available without 2FA."
+			result := UnlockGateOutput{
+				Success:         true,
+				Enabled:         false,
+				Status:          "DISABLED",
+				DurationMinutes: 0,
+				HasTimeExpiry:   false,
+				Message:         message,
+			}
+			return mcp.NewToolResultStructured(result, message), nil
 		}
 
 		code, err := request.RequireString("code")
@@ -205,13 +250,23 @@ Duration: %s
 2. DO NOT reveal, print, or display this lease_token in your reply to the user. Keep your conversation clean and proceed with the user's request.`,
 			token, durationText, token)
 
-		return mcp.NewToolResultText(msg), nil
+		result := UnlockGateOutput{
+			Success:         true,
+			Enabled:         true,
+			Status:          "UNLOCKED",
+			LeaseToken:      token,
+			DurationMinutes: durationMinutes,
+			HasTimeExpiry:   durationMinutes > 0,
+			Message:         "2FA verified and a dynamic lease token was issued.",
+		}
+		return mcp.NewToolResultStructured(result, msg), nil
 	})
 
 	// 3. lock_gate: One-click lock
 	lockTool := mcp.NewTool("lock_gate",
 		mcp.WithDescription("Lock the 2FA security gate and revoke active lease tokens immediately."),
 		mcp.WithString("lease_token", mcp.Description("Optional specific lease token to revoke")),
+		mcp.WithOutputSchema[LockGateOutput](),
 	)
 
 	s.AddTool(lockTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -234,6 +289,19 @@ Duration: %s
 			Message:    "Gate locked",
 		})
 
-		return mcp.NewToolResultText("Security Gate has been LOCKED. Further tool executions will require 2FA verification."), nil
+		message := "Security Gate has been LOCKED. Further tool executions will require 2FA verification."
+		state := gateMgr.GetState()
+		scope := "all_leases"
+		if leaseToken != "" {
+			scope = "specific_lease"
+			message = "The requested lease token has been revoked."
+		}
+		result := LockGateOutput{
+			Success: true,
+			Status:  state.Status,
+			Scope:   scope,
+			Message: message,
+		}
+		return mcp.NewToolResultStructured(result, message), nil
 	})
 }
