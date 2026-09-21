@@ -64,6 +64,8 @@
 
 > ⚠️ **Shell 权限边界**：`work_dir` 只限制命令的**起始工作目录**。由于 `execute_command` 提供的是完整 Shell，它会继承 2cfa-mcp 进程本身的系统权限，并不是 chroot/bwrap 级文件系统沙箱。真正需要只读/只写 workspace 时，请优先使用 `read_file` / `write_file` / `list_dir`，这些工具会执行路径穿越与符号链接逃逸检查。
 
+> 🧩 **结构化返回**：v1.0.10 起，全部工具都会向支持 MCP structured content 的客户端公开 `outputSchema`。成功结果同时包含机器可读 `structuredContent` 和人类可读文本，因此旧客户端仍兼容；例如 `execute_command` 会直接提供 `stdout`、`stderr`、`exit_code`、`duration_ms`、截断状态等字段。
+
 ### 2. 可选 2FA 安全门禁工具（仅当你主动开启 2FA 时才需要）
 
 *如果你只是本地使用或局域网使用，以下 3 个工具完全可以忽略，平时不需要使用它们：*
@@ -127,6 +129,8 @@ TOTP_SECRET=
 > 🛡️ **v1.0.8 开源加固**：Release 构建与发布写权限隔离；CI 增加 Go race detector；`.env` 启动时收紧到 `0600`；命令审计不再保存命令参数；活动 lease 数量有界；目录列表和正数执行超时增加上限；Dashboard 增加 no-referrer/no-store/CSP 等浏览器安全头。
 
 > 🛡️ **v1.0.9 深度加固**：URL Token 日志改为结构化脱敏；敏感密钥不再允许出现在 CLI argv；文件读取在流式读取阶段强制 10MB 上限；Supervisor 使用精确 PID 停止进程；GitHub Actions 锁定 immutable commit SHA，并由 Dependabot 自动跟踪 Go/Actions 更新。
+
+> 🧩 **v1.0.10 结构化输出升级**：全部 10 个 MCP 工具声明标准 `outputSchema`，成功调用同时返回 `structuredContent` 与原有文本 fallback。ChatGPT/Agent 可直接读取稳定 JSON 字段，不再依赖解析自然语言文本；服务端同时启用 output schema 运行时校验。
 
 项目自带高可用 Supervisor 脚本，支持进程自愈重启与 Termux 唤醒锁防休眠：
 ```bash
@@ -321,6 +325,8 @@ chmod +x scripts/daemon.sh
    - **Type**: `SSE`
    - **URL**: `https://<YOUR-TUNNEL-DOMAIN>/mcp/<YOUR_AUTH_TOKEN>/sse`
 3. Click **Save & Connect**. All 10 remote tools will be available immediately!
+
+All tools publish MCP `outputSchema` and return `structuredContent` plus a backward-compatible text fallback, so clients can consume stable JSON fields without scraping human-readable output.
 
 ---
 
