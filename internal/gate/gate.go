@@ -230,67 +230,11 @@ func (m *Manager) Disable2FA() error {
 	return nil
 }
 
-// Configure2FA is a direct configuration method (backward-compatible).
-func (m *Manager) Configure2FA(secret string, enable bool) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	activeSecret := m.totpSecret
-	if enable {
-		if secret != "" {
-			if err := ValidateSecretFormat(secret); err != nil {
-				return "", err
-			}
-			activeSecret = strings.ToUpper(strings.ReplaceAll(secret, " ", ""))
-		} else if activeSecret == "" {
-			sec, err := GenerateRandomSecret()
-			if err != nil {
-				return "", err
-			}
-			activeSecret = sec
-		}
-	}
-
-	if m.envPath != "" {
-		updates := map[string]string{
-			"ENABLE_2FA_GATE": fmt.Sprintf("%t", enable),
-		}
-		if enable && activeSecret != "" {
-			updates["TOTP_SECRET"] = activeSecret
-		}
-		if err := PersistEnv(m.envPath, updates); err != nil {
-			return "", fmt.Errorf("failed to persist 2FA configuration: %w", err)
-		}
-	}
-
-	m.totpSecret = activeSecret
-	m.enabled = enable
-	if !enable {
-		m.leases = make(map[string]*Lease)
-	}
-
-	return m.totpSecret, nil
-}
-
 // HasSecret returns whether a TOTP secret is configured.
 func (m *Manager) HasSecret() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.totpSecret != ""
-}
-
-// GetSecret returns the configured TOTP secret.
-func (m *Manager) GetSecret() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.totpSecret
-}
-
-// GetPendingSecret returns the pending TOTP secret if any.
-func (m *Manager) GetPendingSecret() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.pendingSecret
 }
 
 // IsEnabled returns whether 2FA gate is currently active.
@@ -509,19 +453,6 @@ func (m *Manager) ValidateLease(token string) (bool, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.validateLeaseLocked(token, time.Now())
-}
-
-// CheckAccess provides a backward-compatible check.
-func (m *Manager) CheckAccess() (bool, string) {
-	return m.ValidateLease("")
-}
-
-// RecordActivity placeholder for backward compatibility.
-func (m *Manager) RecordActivity() {}
-
-// Unlock mints a lease for backward-compatible callers.
-func (m *Manager) Unlock(code string) (string, error) {
-	return m.CreateLease(code, 0, "web_ui", "LOCAL")
 }
 
 // UnlockForClient preserves the real client identity for rate limiting and audit.
