@@ -2,8 +2,8 @@ package tools
 
 import (
 	"context"
-	"io"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	MaxReadFileBytes   = 10 * 1024 * 1024 // 10 MB limit for single file read
+	MaxReadFileBytes  = 10 * 1024 * 1024 // 10 MB limit for single file read
 	MaxListDirEntries = 2000             // bound directory listing output and memory
 )
 
