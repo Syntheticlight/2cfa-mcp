@@ -45,11 +45,8 @@ func main() {
 	authToken := os.Getenv("AUTH_TOKEN")
 	totpSecret := getEnvStr("TOTP_SECRET", "")
 
-	if authToken == "" {
-		log.Fatalf("[FATAL] AUTH_TOKEN must be set via environment or .env")
-	}
-	if *enable2FAFlag && strings.TrimSpace(totpSecret) == "" {
-		log.Fatalf("[FATAL] ENABLE_2FA_GATE=true requires TOTP_SECRET; disable 2FA or configure a valid TOTP secret before startup")
+	if err := validateSecurityConfig(authToken, *enable2FAFlag, totpSecret); err != nil {
+		log.Fatalf("[FATAL] %v", err)
 	}
 
 	cfg := server.ServerConfig{
@@ -106,6 +103,16 @@ func main() {
 	} else {
 		log.Println("[INFO] 2cfa-mcp Server stopped cleanly.")
 	}
+}
+
+func validateSecurityConfig(authToken string, enable2FA bool, totpSecret string) error {
+	if authToken == "" {
+		return fmt.Errorf("AUTH_TOKEN must be set via environment or .env")
+	}
+	if enable2FA && strings.TrimSpace(totpSecret) == "" {
+		return fmt.Errorf("ENABLE_2FA_GATE=true requires TOTP_SECRET; disable 2FA or configure a valid TOTP secret before startup")
+	}
+	return nil
 }
 
 func getEnvStr(key, defaultVal string) string {
