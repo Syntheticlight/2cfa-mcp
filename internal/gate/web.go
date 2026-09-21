@@ -24,6 +24,16 @@ func NewHandler(manager *Manager, authToken string) *Handler {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// The dashboard commonly authenticates via a token in the URL. Prevent
+	// browsers from caching the page or leaking that URL as a referrer.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:")
+
 	// Simple auth check for /gate dashboard: query param ?token= or Authorization header
 	token := r.URL.Query().Get("token")
 	if token == "" {
@@ -447,30 +457,6 @@ const dashboardHTML = `<!DOCTYPE html>
       }[ch]));
     }
 
-    function formatSeconds(sec) {
-      if (sec <= 0) return "00:00:00";
-      const h = Math.floor(sec / 3600).toString().padStart(2, '0');
-      const m = Math.floor((sec % 3600) / 60).toString().padStart(2, '0');
-      const s = Math.floor(sec % 60).toString().padStart(2, '0');
-      return h + ":" + m + ":" + s;
-    }
-
-    let remainingIdle = 0;
-    let remainingMax = 0;
-    let gateUnlocked = false;
-
-    setInterval(() => {
-      if (gateUnlocked) {
-        if (remainingIdle > 0) remainingIdle--;
-        if (remainingMax > 0) remainingMax--;
-        document.getElementById('idleCountdown').innerText = formatSeconds(remainingIdle);
-        document.getElementById('maxCountdown').innerText = formatSeconds(remainingMax);
-        if (remainingIdle <= 0 || remainingMax <= 0) {
-          fetchStatus();
-        }
-      }
-    }, 1000);
-
     async function fetchStatus() {
       try {
         const res = await fetch('/gate/api/status?token=' + encodeURIComponent(token));
@@ -499,14 +485,12 @@ const dashboardHTML = `<!DOCTYPE html>
       if (!state.enabled) {
         badge.className = 'status-pill disabled';
         badge.innerText = 'Gate Disabled';
-        gateUnlocked = true;
         gateBox.innerText = 'DISABLED';
         leasesBox.innerText = '100% UNRESTRICTED';
         return;
       }
 
       const isUnlocked = state.status === 'UNLOCKED' || state.unlocked;
-      gateUnlocked = isUnlocked;
       if (isUnlocked) {
         badge.className = 'status-pill unlocked';
         badge.innerText = 'Gate Unlocked';
