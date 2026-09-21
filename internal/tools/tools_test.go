@@ -396,7 +396,6 @@ func TestListDirTruncatesLargeDirectories(t *testing.T) {
 	}
 }
 
-
 func TestReadFileRejectsOversizedContent(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "large.bin")
