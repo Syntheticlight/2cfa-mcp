@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -173,10 +174,43 @@ func constantTimeCompare(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-// SanitizeURL removes token values from URL paths for safe logging.
-func SanitizeURL(path string, token string) string {
-	if token != "" && strings.Contains(path, token) {
-		return strings.ReplaceAll(path, token, "[REDACTED]")
+// SanitizeURL structurally removes credentials from request URIs before
+// logging. Query parsing handles percent-encoding, while the /mcp/<token>/...
+// credential segment is redacted regardless of the token's encoded spelling.
+func SanitizeURL(rawURI string, token string) string {
+	u, err := url.ParseRequestURI(rawURI)
+	if err != nil {
+		// Best-effort fallback for malformed URIs. Normal net/http requests
+		// should not reach this path, but never knowingly log a token.
+		safe := rawURI
+		for _, candidate := range []string{token, url.PathEscape(token), url.QueryEscape(token)} {
+			if candidate != "" {
+				safe = strings.ReplaceAll(safe, candidate, "[REDACTED]")
+			}
+		}
+		return safe
 	}
-	return path
+
+	path := u.Path
+	if strings.HasPrefix(path, "/mcp/") {
+		parts := strings.Split(path, "/")
+		if len(parts) > 2 && parts[2] != "" {
+			parts[2] = "[REDACTED]"
+			path = strings.Join(parts, "/")
+		}
+	} else if token != "" {
+		path = strings.ReplaceAll(path, token, "[REDACTED]")
+	}
+
+	query := u.Query()
+	if _, exists := query["token"]; exists {
+		query.Set("token", "[REDACTED]")
+	}
+	if len(query) == 0 {
+		return path
+	}
+
+	encodedQuery := query.Encode()
+	encodedQuery = strings.ReplaceAll(encodedQuery, url.QueryEscape("[REDACTED]"), "[REDACTED]")
+	return path + "?" + encodedQuery
 }

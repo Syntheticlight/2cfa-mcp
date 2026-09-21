@@ -25,8 +25,10 @@ func TestGateDefaultAndLeaseLifecycle(t *testing.T) {
 		t.Errorf("expected default disabled 2FA to allow access directly, got: %s", msg)
 	}
 
-	// 2. Enable 2FA dynamically via Configure2FA
-	mgr.Configure2FA(secret, true)
+	// 2. Enable the configured 2FA gate.
+	mgr.mu.Lock()
+	mgr.enabled = true
+	mgr.mu.Unlock()
 
 	allowed, _ = mgr.ValidateLease("")
 	if allowed {
@@ -121,7 +123,7 @@ func TestGateHandlerCaseInsensitiveBearer(t *testing.T) {
 	}
 }
 
-func TestAutoGenerateSecretAndPersistEnv(t *testing.T) {
+func TestSetupLifecycleGeneratesSecretAndPersistsEnv(t *testing.T) {
 	tmpDir := t.TempDir()
 	envFile := filepath.Join(tmpDir, ".env")
 
@@ -130,19 +132,25 @@ func TestAutoGenerateSecretAndPersistEnv(t *testing.T) {
 		EnvPath: envFile,
 	})
 
-	// 1. Configure2FA with empty secret -> Should auto generate Base32 secret!
-	secret, err := mgr.Configure2FA("", true)
+	secret, err := mgr.BeginSetup2FA("")
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected setup error: %v", err)
 	}
 	if len(secret) != 32 {
-		t.Errorf("expected 32-character Base32 secret, got: %s (len: %d)", secret, len(secret))
+		t.Fatalf("expected 32-character Base32 secret, got len=%d", len(secret))
 	}
 	if err := ValidateSecretFormat(secret); err != nil {
-		t.Errorf("generated secret is not valid Base32: %v", err)
+		t.Fatalf("generated secret is not valid Base32: %v", err)
 	}
 
-	// 2. Check that .env file was created and contains the secret and ENABLE_2FA_GATE=true
+	code, err := GenerateCurrentTOTP(secret, time.Now())
+	if err != nil {
+		t.Fatalf("generate setup code: %v", err)
+	}
+	if _, _, err := mgr.ConfirmSetup2FA(code, "127.0.0.1", "LOCAL"); err != nil {
+		t.Fatalf("confirm setup: %v", err)
+	}
+
 	data, err := os.ReadFile(envFile)
 	if err != nil {
 		t.Fatalf("failed to read persisted .env: %v", err)
@@ -152,12 +160,10 @@ func TestAutoGenerateSecretAndPersistEnv(t *testing.T) {
 		t.Errorf("expected .env to contain ENABLE_2FA_GATE=true, got: %s", content)
 	}
 	if !strings.Contains(content, "TOTP_SECRET="+secret) {
-		t.Errorf("expected .env to contain TOTP_SECRET=%s, got: %s", secret, content)
+		t.Errorf("expected .env to contain generated TOTP secret")
 	}
 
-	// 3. Disable 2FA -> should update .env
-	_, err = mgr.Configure2FA("", false)
-	if err != nil {
+	if err := mgr.Disable2FA(); err != nil {
 		t.Fatalf("unexpected error disabling 2FA: %v", err)
 	}
 	data, _ = os.ReadFile(envFile)
@@ -165,7 +171,6 @@ func TestAutoGenerateSecretAndPersistEnv(t *testing.T) {
 		t.Errorf("expected .env to contain ENABLE_2FA_GATE=false, got: %s", string(data))
 	}
 }
-
 func TestPendingSecretReuseAndReset(t *testing.T) {
 	mgr := NewManager(Config{Enabled: false})
 
@@ -254,7 +259,7 @@ func TestTOTPRateLimit(t *testing.T) {
 	}
 }
 
-func TestConfigure2FAPersistFailureDoesNotChangeRuntimeState(t *testing.T) {
+func TestConfirmSetupPersistFailureDoesNotChangeRuntimeState(t *testing.T) {
 	tmpDir := t.TempDir()
 	missingDirEnv := filepath.Join(tmpDir, "missing", ".env")
 	secret := "JBSWY3DPEHPK3PXP"
@@ -263,18 +268,23 @@ func TestConfigure2FAPersistFailureDoesNotChangeRuntimeState(t *testing.T) {
 		Enabled: false,
 		EnvPath: missingDirEnv,
 	})
-
-	if _, err := mgr.Configure2FA(secret, true); err == nil {
+	if _, err := mgr.BeginSetup2FA(secret); err != nil {
+		t.Fatalf("begin setup: %v", err)
+	}
+	code, err := GenerateCurrentTOTP(secret, time.Now())
+	if err != nil {
+		t.Fatalf("generate setup code: %v", err)
+	}
+	if _, _, err := mgr.ConfirmSetup2FA(code, "127.0.0.1", "LOCAL"); err == nil {
 		t.Fatal("expected persistence failure")
 	}
 	if mgr.IsEnabled() {
 		t.Fatal("2FA runtime state must remain disabled when persistence fails")
 	}
-	if mgr.GetSecret() != "" {
+	if mgr.HasSecret() {
 		t.Fatal("TOTP secret must not be committed to runtime state when persistence fails")
 	}
 }
-
 func TestLeaseLimitEvictsOldest(t *testing.T) {
 	mgr := NewManager(Config{Enabled: true, TOTPSecret: "JBSWY3DPEHPK3PXP"})
 	base := time.Now().Add(-time.Hour)

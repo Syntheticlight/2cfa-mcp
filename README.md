@@ -91,13 +91,15 @@ vim .env  # 或使用 nano/文本编辑器
 在 `.env` 中填入你的专有安全密钥：
 ```ini
 PORT=2232
-AUTH_TOKEN=your-high-entropy-secret-token-here
+AUTH_TOKEN=your-high-entropy-url-safe-token-here
 WORKSPACE_PATH=./workspace
 EXEC_TIMEOUT=120
 ENABLE_2FA_GATE=false
 TOTP_SECRET=
 ```
 *(注：`ENABLE_2FA_GATE` 建议保持 `false`，后续在与 ChatGPT 对话中可随时动态开启)*
+
+> 🔐 **密钥配置**：`AUTH_TOKEN` 与 `TOTP_SECRET` 只从环境变量或 `.env` 读取，不接受命令行参数，避免出现在 `ps` / `/proc/.../cmdline`。如果使用默认 URL Path Token 模式，建议用 `openssl rand -hex 32` 生成 URL-safe Token。手工设置 `ENABLE_2FA_GATE=true` 时必须同时提供有效 `TOTP_SECRET`，否则服务会拒绝启动。
 
 ### 2. 编译服务端
 - **本机编译**：
@@ -123,6 +125,8 @@ TOTP_SECRET=
 > 🛡️ **v1.0.7 安全加固**：SSE 长连接不再受全局写超时影响；显式系统环境变量优先于 `.env`；CI/Release 会执行 `govulncheck ./...`；最低 Go 工具链提升到包含标准库安全修复的 1.26.8，并将 `golang.org/x/text` 升级到已修复 GO-2026-5970 的版本。
 
 > 🛡️ **v1.0.8 开源加固**：Release 构建与发布写权限隔离；CI 增加 Go race detector；`.env` 启动时收紧到 `0600`；命令审计不再保存命令参数；活动 lease 数量有界；目录列表和正数执行超时增加上限；Dashboard 增加 no-referrer/no-store/CSP 等浏览器安全头。
+
+> 🛡️ **v1.0.9 深度加固**：URL Token 日志改为结构化脱敏；敏感密钥不再允许出现在 CLI argv；文件读取在流式读取阶段强制 10MB 上限；Supervisor 使用精确 PID 停止进程；GitHub Actions 锁定 immutable commit SHA，并由 Dependabot 自动跟踪 Go/Actions 更新。
 
 项目自带高可用 Supervisor 脚本，支持进程自愈重启与 Termux 唤醒锁防休眠：
 ```bash
@@ -164,7 +168,7 @@ https://xxx-xxx-xxx.trycloudflare.com
      > **【推荐免 Header 模式（URL 鉴权）】**  
      > 由于部分浏览器及 WebHook 场景无法向 SSE 请求中附加自定义 HTTP Header，`2cfa-mcp` 原生支持直接将 Token 编入路径：  
      > `https://<你的穿透域名>/mcp/<你的AUTH_TOKEN>/sse`  
-     > *示例：`https://xxx.trycloudflare.com/mcp/your-high-entropy-secret-token-here/sse`*
+     > *示例：`https://xxx.trycloudflare.com/mcp/your-high-entropy-url-safe-token-here/sse`*
      >
      > **【标准 Header 模式】**  
      > URL 填写：`https://<你的穿透域名>/sse`  
@@ -301,7 +305,9 @@ git clone https://github.com/Syntheticlight/2cfa-mcp.git
 cd 2cfa-mcp
 
 cp .env.example .env
-# Edit .env and set your AUTH_TOKEN
+# Edit .env and set your AUTH_TOKEN.
+# Recommended: openssl rand -hex 32
+# AUTH_TOKEN/TOTP_SECRET are read only from environment/.env, not CLI argv.
 
 make build
 chmod +x scripts/daemon.sh

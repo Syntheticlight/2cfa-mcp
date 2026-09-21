@@ -206,6 +206,7 @@ func TestResolveShell(t *testing.T) {
 }
 
 func TestSetup2FAValidation(t *testing.T) {
+	secret := "JBSWY3DPEHPK3PXP"
 	gateMgr := gate.NewManager(gate.Config{Enabled: false})
 	mcpSrv := server.NewMCPServer("test", "1.0.0")
 	RegisterGateTools(mcpSrv, gateMgr)
@@ -215,7 +216,10 @@ func TestSetup2FAValidation(t *testing.T) {
 	// 1. Step 1: Initiate without secret -> Auto-generates secret in pending state
 	reqNoSecret := mcp.CallToolRequest{}
 	reqNoSecret.Params.Name = "setup_2fa"
-	reqNoSecret.Params.Arguments = map[string]any{"enable": true}
+	reqNoSecret.Params.Arguments = map[string]any{
+		"enable": true,
+		"secret": secret,
+	}
 
 	res, err := setupTool.Handler(context.Background(), reqNoSecret)
 	if err != nil || res.IsError {
@@ -237,8 +241,7 @@ func TestSetup2FAValidation(t *testing.T) {
 	}
 
 	// 3. Step 2: Confirm with valid code -> Must succeed and activate 2FA
-	pendingSec := gateMgr.GetPendingSecret()
-	validCode, _ := generateTestTOTP(pendingSec)
+	validCode, _ := generateTestTOTP(secret)
 	reqValidCode := mcp.CallToolRequest{}
 	reqValidCode.Params.Name = "setup_2fa"
 	reqValidCode.Params.Arguments = map[string]any{"enable": true, "code": validCode}
@@ -390,5 +393,38 @@ func TestListDirTruncatesLargeDirectories(t *testing.T) {
 	text := res.Content[0].(mcp.TextContent).Text
 	if !strings.Contains(text, "listing truncated after") {
 		t.Fatal("expected large directory listing to be truncated")
+	}
+}
+
+func TestReadFileRejectsOversizedContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "large.bin")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create oversized file: %v", err)
+	}
+	if err := file.Truncate(int64(MaxReadFileBytes) + 1); err != nil {
+		_ = file.Close()
+		t.Fatalf("truncate oversized file: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close oversized file: %v", err)
+	}
+
+	gateMgr := gate.NewManager(gate.Config{Enabled: false})
+	mcpSrv := server.NewMCPServer("test-read-limit", "1.0.0")
+	RegisterFileTools(mcpSrv, tmpDir, gateMgr)
+
+	tool := mcpSrv.GetTool("read_file")
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "read_file"
+	req.Params.Arguments = map[string]any{"path": "large.bin"}
+
+	res, err := tool.Handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected oversized file read to be rejected")
 	}
 }
