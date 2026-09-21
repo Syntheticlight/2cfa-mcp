@@ -75,7 +75,7 @@ func RegisterSysInfoTool(s *server.MCPServer, gateMgr *gate.Manager) {
 	}
 
 	toolStatus := mcp.NewTool("system_status",
-		mcp.WithDescription("Get system hardware load (CPU, RAM), 2FA gate status, and version update information. Harmless read-only tool."),
+		mcp.WithDescription("Get OS/architecture, logical CPU count, Go process memory/runtime metrics, 2FA gate status, and version update information. Harmless read-only tool."),
 	)
 	s.AddTool(toolStatus, statusHandler)
 
