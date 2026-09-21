@@ -78,22 +78,22 @@ type LockGateOutput struct {
 
 // SystemStatusOutput is the structured result returned by system_status/system_info.
 type SystemStatusOutput struct {
-	Version            string  `json:"version"`
-	LatestVersion      string  `json:"latest_version"`
-	UpdateAvailable    bool    `json:"update_available"`
-	ReleaseURL         string  `json:"release_url,omitempty"`
-	OS                 string  `json:"os"`
-	Architecture       string  `json:"architecture"`
-	LogicalCPUs        int     `json:"logical_cpus"`
-	Goroutines         int     `json:"goroutines"`
-	UptimeSeconds      int64   `json:"uptime_seconds"`
-	AllocatedRAMMB     float64 `json:"allocated_ram_mb"`
-	RuntimeSysMB       float64 `json:"runtime_sys_mb"`
-	HeapAllocatedMB    float64 `json:"heap_allocated_mb"`
-	GCCycles           uint32  `json:"gc_cycles"`
-	GateEnabled        bool    `json:"gate_enabled"`
-	GateStatus         string  `json:"gate_status"`
-	ActiveLeases       int     `json:"active_leases"`
+	Version         string  `json:"version"`
+	LatestVersion   string  `json:"latest_version"`
+	UpdateAvailable bool    `json:"update_available"`
+	ReleaseURL      string  `json:"release_url,omitempty"`
+	OS              string  `json:"os"`
+	Architecture    string  `json:"architecture"`
+	LogicalCPUs     int     `json:"logical_cpus"`
+	Goroutines      int     `json:"goroutines"`
+	UptimeSeconds   int64   `json:"uptime_seconds"`
+	AllocatedRAMMB  float64 `json:"allocated_ram_mb"`
+	RuntimeSysMB    float64 `json:"runtime_sys_mb"`
+	HeapAllocatedMB float64 `json:"heap_allocated_mb"`
+	GCCycles        uint32  `json:"gc_cycles"`
+	GateEnabled     bool    `json:"gate_enabled"`
+	GateStatus      string  `json:"gate_status"`
+	ActiveLeases    int     `json:"active_leases"`
 }
 
 // CheckUpdateOutput is the structured result returned by check_update.
