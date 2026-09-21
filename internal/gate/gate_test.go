@@ -275,7 +275,6 @@ func TestConfigure2FAPersistFailureDoesNotChangeRuntimeState(t *testing.T) {
 	}
 }
 
-
 func TestLeaseLimitEvictsOldest(t *testing.T) {
 	mgr := NewManager(Config{Enabled: true, TOTPSecret: "JBSWY3DPEHPK3PXP"})
 	base := time.Now().Add(-time.Hour)
