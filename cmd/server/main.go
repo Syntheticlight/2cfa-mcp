@@ -132,6 +132,10 @@ func getEnvBool(key string, defaultVal bool) bool {
 func loadDotEnv(paths ...string) string {
 	for _, p := range paths {
 		if data, err := os.ReadFile(p); err == nil {
+			// Best-effort secret hardening for multi-user hosts. On Unix-like
+			// systems this removes group/other access from an existing .env.
+			_ = os.Chmod(p, 0600)
+
 			lines := strings.Split(string(data), "\n")
 			for _, line := range lines {
 				line = strings.TrimSpace(line)
