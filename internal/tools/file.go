@@ -67,25 +67,35 @@ func RegisterFileTools(s *server.MCPServer, workspaceRoot string, gateMgr *gate.
 			return mcp.NewToolResultError(fmt.Sprintf("security violation: %v", err)), nil
 		}
 
-		info, err := os.Stat(targetPath)
+		file, err := os.Open(targetPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return mcp.NewToolResultError(fmt.Sprintf("file not found: %s", relPath)), nil
 			}
+			return mcp.NewToolResultError(fmt.Sprintf("failed to open file '%s': permission denied or read error", relPath)), nil
+		}
+		defer file.Close()
+
+		info, err := file.Stat()
+		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to stat file: %s", relPath)), nil
 		}
-
 		if info.IsDir() {
 			return mcp.NewToolResultError("target path is a directory, not a file"), nil
 		}
-
 		if info.Size() > MaxReadFileBytes {
 			return mcp.NewToolResultError(fmt.Sprintf("file size (%d bytes) exceeds max read limit (%d bytes)", info.Size(), MaxReadFileBytes)), nil
 		}
 
-		content, err := os.ReadFile(targetPath)
+		// The reader itself is also bounded. This closes the Stat -> ReadFile
+		// race where another local process could grow the file after the size
+		// check and force an unexpectedly large allocation.
+		content, err := io.ReadAll(io.LimitReader(file, int64(MaxReadFileBytes)+1))
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to read file '%s': permission denied or read error", relPath)), nil
+		}
+		if len(content) > MaxReadFileBytes {
+			return mcp.NewToolResultError(fmt.Sprintf("file exceeded max read limit (%d bytes) while being read", MaxReadFileBytes)), nil
 		}
 
 		gateMgr.AddAudit(gate.AuditEntry{
