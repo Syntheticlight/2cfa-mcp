@@ -51,9 +51,7 @@ type Setup2FAOutput struct {
 	Enabled    bool   `json:"enabled"`
 	Status     string `json:"status"`
 	Message    string `json:"message"`
-	Secret     string `json:"secret,omitempty"`
 	OTPAuthURI string `json:"otp_auth_uri,omitempty"`
-	QRCode     string `json:"qr_code,omitempty"`
 	LeaseToken string `json:"lease_token,omitempty"`
 }
 
