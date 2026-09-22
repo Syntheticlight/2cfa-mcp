@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, e.g. v1.0.10"
+        description: "Release tag, e.g. v1.0.12"
         required: true
-        default: "v1.0.11"
+        default: "v1.0.12"
 
 # Validation/build jobs are read-only. Only the final publishing job receives
 # contents:write, and it never checks out or executes repository code.

@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -225,9 +227,40 @@ func TestSetup2FAValidation(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Errorf("expected success with auto-generated secret, got: %+v", res)
 	}
-	text := res.Content[0].(mcp.TextContent).Text
-	if !strings.Contains(text, "Scan QR Code") {
-		t.Errorf("expected response to contain QR code block, got: %s", text)
+	if len(res.Content) < 2 {
+		t.Fatalf("expected PNG image plus text fallback, got %d content items", len(res.Content))
+	}
+
+	image, ok := res.Content[0].(mcp.ImageContent)
+	if !ok {
+		t.Fatalf("expected first setup content item to be PNG image, got %T", res.Content[0])
+	}
+	if image.MIMEType != "image/png" {
+		t.Fatalf("expected image/png, got %q", image.MIMEType)
+	}
+	pngBytes, err := base64.StdEncoding.DecodeString(image.Data)
+	if err != nil {
+		t.Fatalf("invalid base64 PNG data: %v", err)
+	}
+	if !bytes.HasPrefix(pngBytes, []byte{0x89, 'P', 'N', 'G'}) {
+		t.Fatal("setup_2fa image content is not a PNG")
+	}
+
+	textContent, ok := res.Content[1].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected second setup content item to be text fallback, got %T", res.Content[1])
+	}
+	text := textContent.Text
+	if !strings.Contains(text, "otpauth://totp/") {
+		t.Errorf("expected response to contain backup OTP Auth URI, got: %s", text)
+	}
+	if strings.Contains(text, "Base32 Secret:") || strings.Contains(text, "████") {
+		t.Errorf("setup response must not contain standalone Base32 secret or character QR: %s", text)
+	}
+
+	out, ok := res.StructuredContent.(Setup2FAOutput)
+	if !ok || out.OTPAuthURI == "" {
+		t.Fatalf("expected structured otp_auth_uri, got %#v", res.StructuredContent)
 	}
 
 	// 2. Step 2: Confirm with wrong code -> Must fail and not activate 2FA

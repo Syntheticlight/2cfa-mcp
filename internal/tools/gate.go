@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"math"
 	"os"
@@ -18,7 +19,7 @@ import (
 func RegisterGateTools(s *server.MCPServer, gateMgr *gate.Manager) {
 	// 1. setup_2fa: Standard 2FA setup and confirmation flow
 	setupTool := mcp.NewTool("setup_2fa",
-		mcp.WithDescription("Standard 2FA setup and confirmation flow. Step 1: Call with enable=true (without code) to generate a Base32 secret & OTP URI. Step 2: Call with enable=true and code='<6-digit>' to verify, confirm, and permanently activate 2FA with automatic session unlocking. Call with enable=false to turn off 2FA."),
+		mcp.WithDescription("Standard 2FA setup and confirmation flow. Step 1: Call with enable=true (without code) to generate a scannable PNG QR code plus a backup OTP Auth URI. Step 2: Call with enable=true and code='<6-digit>' to verify, confirm, and permanently activate 2FA with automatic session unlocking. Call with enable=false to turn off 2FA."),
 		mcp.WithBoolean("enable", mcp.Required(), mcp.Description("true to initiate or confirm 2FA setup, false to turn OFF 2FA")),
 		mcp.WithString("code", mcp.Description("The 6-digit TOTP verification code from Authenticator to confirm and activate pending setup")),
 		mcp.WithString("secret", mcp.Description("Optional custom Base32 secret string. If omitted, a secure secret is automatically generated")),
@@ -125,28 +126,19 @@ Dynamic Lease Token: %s (Auto-unlocked for this session)
 		}
 		otpauthURI := fmt.Sprintf("otpauth://totp/2cfa-mcp:%s?secret=%s&issuer=2cfa-mcp", nodeName, pendingSecret)
 
-		var qrBlock string
-		if qr, qrErr := qrcode.New(otpauthURI, qrcode.Medium); qrErr == nil {
-			qrBlock = qr.ToSmallString(false)
-		}
-
-		qrSection := ""
-		if qrBlock != "" {
-			qrSection = fmt.Sprintf("\n=== Scan QR Code with Authenticator ===\n```\n%s\n```\n", qrBlock)
+		pngBytes, qrErr := qrcode.Encode(otpauthURI, qrcode.Medium, 256)
+		if qrErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to generate 2FA QR code: %v", qrErr)), nil
 		}
 
 		msg := fmt.Sprintf(`[2FA SETUP - PENDING VERIFICATION]
-A 2FA secret has been generated. 2FA is NOT active yet until verified.
+Scan the attached PNG QR code with your authenticator app.
 
-=== 2FA Credentials ===
-Base32 Secret: %s
-OTP Auth URI:  %s
+Backup OTP Auth URI:
 %s
-=== CRITICAL NEXT STEP ===
-1. Scan the QR code above with your authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, or iOS Passwords), or manually enter the Base32 Secret.
-2. Ask the user for the 6-digit dynamic code currently shown in their app.
-3. Call setup_2fa(enable=true, code="<6-digit-code>") to confirm and permanently activate 2FA.`,
-			pendingSecret, otpauthURI, qrSection)
+
+After adding it, provide the current 6-digit code to complete 2FA activation.`,
+			otpauthURI)
 
 		state := gateMgr.GetState()
 		result := Setup2FAOutput{
@@ -154,12 +146,16 @@ OTP Auth URI:  %s
 			Action:     "pending_verification",
 			Enabled:    state.Enabled,
 			Status:     state.Status,
-			Message:    "2FA setup is pending verification with a 6-digit TOTP code.",
-			Secret:     pendingSecret,
+			Message:    "Scan the PNG QR code; use otp_auth_uri only as a backup.",
 			OTPAuthURI: otpauthURI,
-			QRCode:     qrBlock,
 		}
-		return mcp.NewToolResultStructured(result, msg), nil
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.NewImageContent(base64.StdEncoding.EncodeToString(pngBytes), "image/png"),
+				mcp.NewTextContent(msg),
+			},
+			StructuredContent: result,
+		}, nil
 	})
 
 	// 2. unlock_gate: Unlock with optional duration (0 = never expires)
