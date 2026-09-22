@@ -136,6 +136,8 @@ TOTP_SECRET=
 
 > 🛡️ **v1.0.11 运行时与安全加固**：工作区文件操作引入 `os.Root` 目录隔离，防止外部软链接逃逸与检查-使用竞态；2FA 管理操作同一锁内原子校验并支持配置变更后立即注销待确认密钥；严格校验租约有效时长；优化 HTTP 传输层路由与版本更新并发检查。
 
+> 🖼️ **v1.0.12 2FA 扫码体验优化**：`setup_2fa` 初始化时直接返回标准 MCP PNG 二维码，并保留 `otpauth://` URI 作为备用；移除字符二维码和单独 Base32 密钥展示。验证码确认、`unlock_gate`、动态 lease 与 Dashboard 流程保持不变。
+
 项目自带高可用 Supervisor 脚本，支持进程自愈重启与 Termux 唤醒锁防休眠：
 ```bash
 chmod +x scripts/daemon.sh
@@ -240,11 +242,10 @@ https://xxx-xxx-xxx.trycloudflare.com
 ### 2. 对话中动态开启 2FA 门禁（标准两步验证防锁死流程）
 当服务暴露在公网，或打算借给他人使用时，随时在聊天中安全开启，无需预先生成密钥：
 > **用户**：“帮我开启 2FA 门禁。”  
-> **ChatGPT**：*（调用 `setup_2fa(enable=true)` 毫秒级自生成密钥）*  
-> 🔑 **2FA 密钥已生成（待验证确认）！**  
-> - **Base32 密钥**：`WM3H23RKVLQOOZ2GQO52VTEL7Y5H3DCB`  
-> - **绑定链接**：`otpauth://totp/2cfa-mcp?secret=WM3H23...&issuer=2cfa-mcp`  
-> 请将密钥添加到 Google Authenticator 或其他验证器，并将显示的 6 位验证码发给我以完成最终激活。  
+> **ChatGPT**：*（调用 `setup_2fa(enable=true)`）*  
+> 🖼️ **直接显示可扫描的 PNG 二维码**  
+> - **备用绑定链接**：`otpauth://totp/2cfa-mcp?secret=WM3H23...&issuer=2cfa-mcp`  
+> 扫码添加到 Google Authenticator 或其他验证器后，将显示的 6 位验证码发给我以完成最终激活。  
 >  
 > **用户**：“验证码是 482910”  
 > **ChatGPT**：*（调用 `setup_2fa(enable=true, code="482910")` 校验通过，自动持久化写回 `.env`）*  
@@ -332,7 +333,7 @@ chmod +x scripts/daemon.sh
    - **URL**: `https://<YOUR-TUNNEL-DOMAIN>/mcp/<YOUR_AUTH_TOKEN>/sse`
 3. Click **Save & Connect**. All 10 remote tools will be available immediately!
 
-All tools publish MCP `outputSchema` and return `structuredContent` plus a backward-compatible text fallback, so clients can consume stable JSON fields without scraping human-readable output.
+All tools publish MCP `outputSchema` and return `structuredContent` plus a backward-compatible text fallback, so clients can consume stable JSON fields without scraping human-readable output. The `setup_2fa` initiation response also includes a standard MCP `image/png` QR code, with the `otpauth://` URI retained as the only textual credential fallback.
 
 File tools perform operations through `os.Root` to prevent symlink traversal and replacement races. Relative symlinks within the workspace are supported; absolute symlinks are rejected. Command timeouts return structured partial output with `timed_out=true` and an MCP tool error. Lease durations must be whole minutes from 0 to 525600 (0 means no time expiry). A global lock also cancels pending 2FA setup; it does not enable a disabled gate.
 
